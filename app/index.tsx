@@ -79,8 +79,7 @@ useEffect(() => {
       case 'check_responsiveness':
         return shoulderTapDone && voiceCompleted;
       case 'hand_placement':
-       // return handPlacementVerified;
-        return stepTimer >= 5; // Auto-advance after 3 seconds for testing/demo purposes
+        return handPlacementVerified;
       case 'compressions':
         return completedCycles >= totalCycles;
       case 'aed_pads':
@@ -132,6 +131,8 @@ useEffect(() => {
 
   const showCamera = currentStep?.requiresCamera || currentStep?.id === 'compressions';
   const showAED = currentStep?.id === 'aed_pads' || currentStep?.id === 'aed_analyze' || currentStep?.id === 'aed_shock';
+  const showWebTestingPreview = Platform.OS === 'web' && isTesting && !showCamera && !showAED;
+  const showVisualCamera = showCamera || showWebTestingPreview;
   const showCompressions = currentStep?.id === 'compressions' && cyclePhase === 'compress';
   const showPostAedCompressions = currentStep?.id === 'post_aed_compressions';
   const showBreaths = currentStep?.id === 'compressions' && cyclePhase === 'breathe';
@@ -217,17 +218,23 @@ useEffect(() => {
     ? 'Position hands at center of chest'
     : currentStep?.id === 'compressions'
     ? 'Monitoring compression technique'
+    : showWebTestingPreview
+    ? 'Pose preview — hold good posture at Hand Placement to advance'
     : '';
 
   const renderVisualPanel = () => (
     <View style={[useSideBySide ? styles.panel : styles.stackedPanel]}>
-      {showCamera && (
+      {showVisualCamera && (
         <View style={styles.cameraContainer}>
           <CameraViewComponent
-            showOverlay
+            showOverlay={!!cameraOverlayText}
             overlayText={cameraOverlayText}
             onHandDetected={currentStep?.id === 'hand_placement' ? verifyHandPlacement : undefined}
-            enableHandTracking={currentStep?.id === 'hand_placement'}
+            enableHandTracking={
+              currentStep?.id === 'hand_placement' ||
+              (Platform.OS === 'web' && isTesting)
+            }
+            isPaused={isPaused}
           />
         </View>
       )}
@@ -244,10 +251,13 @@ useEffect(() => {
         />
       )}
 
-      {!showCamera && !showAED && (
+      {!showVisualCamera && !showAED && (
         <View style={styles.placeholderPanel}>
           <View style={styles.manikinVisual}>
             <MaterialCommunityIcons name="human" size={isNarrow ? 60 : 80} color={Colors.surfaceHighlight} />
+            <Text style={[styles.placeholderHint, { color: Colors.textMuted }]}>
+              Camera preview at Hand Placement and Compressions
+            </Text>
           </View>
         </View>
       )}
@@ -421,6 +431,12 @@ function makeStyles(Colors: ReturnType<typeof getColors>) {
     manikinVisual: {
       alignItems: 'center',
       gap: 8,
+      paddingHorizontal: 16,
+    },
+    placeholderHint: {
+      fontSize: 12,
+      textAlign: 'center',
+      marginTop: 4,
     },
     hardwareMessage: {
       flexDirection: 'row',

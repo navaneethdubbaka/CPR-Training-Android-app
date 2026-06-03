@@ -1,126 +1,15 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { View, Text, StyleSheet, Pressable, ActivityIndicator } from 'react-native';
 import { Camera, useCameraDevice, useCameraDevices, useCameraFormat, useCameraPermission } from 'react-native-vision-camera';
-import Svg, { Line, Circle, Rect, Text as SvgText } from 'react-native-svg';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getColors } from '@/constants/colors';
 import { useTheme } from '@/contexts/ThemeContext';
-import {
-  SKELETON_CONNECTIONS,
-  CPR_KEYPOINT_INDICES,
-  usePoseDetector,
-  type PoseKeypoint,
-  type CPRPostureResult,
-} from '@/lib/pose-detection';
+import { usePoseDetector, type PoseKeypoint, type CPRPostureResult } from '@/lib/pose-detection';
+import { PoseSkeletonOverlay } from '@/components/PoseSkeletonOverlay';
 
 export const CAMERA_DEVICE_KEY = 'cpr_camera_device_id';
 const GOOD_QUALITY_HOLD_MS = 1500;
-
-const STERNAL_ZONE = { x: 0.35, y: 0.3, w: 0.3, h: 0.35 } as const;
-
-interface SkeletonOverlayProps {
-  keypoints: PoseKeypoint[];
-  result: CPRPostureResult;
-  width: number;
-  height: number;
-  Colors: ReturnType<typeof getColors>;
-}
-
-function SkeletonOverlay({ keypoints, result, width, height, Colors }: SkeletonOverlayProps) {
-  if (!width || !height) return null;
-
-  const hasKeypoints = keypoints.length >= 17;
-
-  const zoneX = STERNAL_ZONE.x * width;
-  const zoneY = STERNAL_ZONE.y * height;
-  const zoneW = STERNAL_ZONE.w * width;
-  const zoneH = STERNAL_ZONE.h * height;
-  const inZone = result.shouldersOverWrists && result.quality === 'good';
-  const zoneColor = inZone ? '#00E676' : Colors.accent;
-  const zoneFill = inZone ? 'rgba(0,230,118,0.12)' : 'rgba(229,57,53,0.10)';
-
-  const kpColor = (kpIdx: number): string => {
-    const kp = keypoints[kpIdx];
-    if (!kp || kp.score < 0.25) return 'rgba(255,255,255,0.2)';
-    if (CPR_KEYPOINT_INDICES.includes(kpIdx)) {
-      return result.quality === 'good'
-        ? '#00E676'
-        : result.quality === 'fair'
-        ? '#FFD600'
-        : '#E53935';
-    }
-    return 'rgba(255,255,255,0.7)';
-  };
-
-  const lineColor = (a: number, b: number): string => {
-    const ka = keypoints[a];
-    const kb = keypoints[b];
-    if (!ka || !kb || ka.score < 0.2 || kb.score < 0.2) return 'rgba(255,255,255,0.1)';
-    const isCprBone = CPR_KEYPOINT_INDICES.includes(a) && CPR_KEYPOINT_INDICES.includes(b);
-    if (!isCprBone) return 'rgba(255,255,255,0.4)';
-    return result.quality === 'good' ? '#00E676' : result.quality === 'fair' ? '#FFD600' : '#E53935';
-  };
-
-  return (
-    <Svg style={StyleSheet.absoluteFillObject} width={width} height={height} pointerEvents="none">
-      {/* Sternal target zone — always visible */}
-      <Rect
-        x={zoneX}
-        y={zoneY}
-        width={zoneW}
-        height={zoneH}
-        fill={zoneFill}
-        stroke={zoneColor}
-        strokeWidth={2.5}
-        rx={8}
-        opacity={0.9}
-      />
-      <SvgText
-        x={zoneX + zoneW / 2}
-        y={zoneY + 18}
-        textAnchor="middle"
-        fill={zoneColor}
-        fontSize={10}
-        fontWeight="bold"
-      >
-        {inZone ? 'CORRECT POSITION' : 'STERNAL TARGET'}
-      </SvgText>
-
-      {/* Skeleton — only when pose is detected */}
-      {hasKeypoints && SKELETON_CONNECTIONS.map(([a, b], i) => {
-        const ka = keypoints[a];
-        const kb = keypoints[b];
-        if (!ka || !kb || ka.score < 0.2 || kb.score < 0.2) return null;
-        const isCprBone = CPR_KEYPOINT_INDICES.includes(a) && CPR_KEYPOINT_INDICES.includes(b);
-        return (
-          <Line
-            key={i}
-            x1={ka.x * width}
-            y1={ka.y * height}
-            x2={kb.x * width}
-            y2={kb.y * height}
-            stroke={lineColor(a, b)}
-            strokeWidth={isCprBone ? 3 : 2}
-          />
-        );
-      })}
-      {hasKeypoints && keypoints.map((kp, i) => {
-        if (kp.score < 0.2) return null;
-        const isKey = CPR_KEYPOINT_INDICES.includes(i);
-        return (
-          <Circle
-            key={i}
-            cx={kp.x * width}
-            cy={kp.y * height}
-            r={isKey ? 6 : 4}
-            fill={kpColor(i)}
-          />
-        );
-      })}
-    </Svg>
-  );
-}
 
 interface Props {
   onHandDetected?: () => void;
@@ -128,6 +17,7 @@ interface Props {
   enableHandTracking?: boolean;
   showOverlay?: boolean;
   overlayText?: string;
+  isPaused?: boolean;
 }
 
 export function PoseCameraView({
@@ -136,6 +26,7 @@ export function PoseCameraView({
   enableHandTracking = true,
   showOverlay,
   overlayText,
+  isPaused = false,
 }: Props) {
   const { theme } = useTheme();
   const Colors = getColors(theme);
@@ -179,6 +70,12 @@ export function PoseCameraView({
     setPostureResult(result);
     onPoseQuality?.(result.quality);
 
+    if (isPaused) {
+      goodSinceRef.current = null;
+      handDetectedFiredRef.current = false;
+      return;
+    }
+
     if (result.quality === 'good') {
       if (goodSinceRef.current === null) {
         goodSinceRef.current = Date.now();
@@ -190,10 +87,12 @@ export function PoseCameraView({
       goodSinceRef.current = null;
       handDetectedFiredRef.current = false;
     }
-  }, [onHandDetected, onPoseQuality]);
+  }, [onHandDetected, onPoseQuality, isPaused]);
+
+  const detectorEnabled = enableHandTracking && !isPaused;
 
   const { state: modelState, frameProcessor } = usePoseDetector(
-    enableHandTracking,
+    detectorEnabled,
     handlePostureResult,
   );
 
@@ -266,7 +165,7 @@ export function PoseCameraView({
       />
 
       {enableHandTracking && viewSize.width > 0 && (
-        <SkeletonOverlay
+        <PoseSkeletonOverlay
           keypoints={keypoints}
           result={postureResult}
           width={viewSize.width}
@@ -296,6 +195,14 @@ export function PoseCameraView({
                   Position {postureResult.shouldersOverWrists ? 'GOOD ✓' : '— lean forward ✗'}
                 </Text>
               </View>
+              {postureResult.tips.length > 0 && (
+                <View style={styles.feedbackRow}>
+                  <MaterialCommunityIcons name="lightbulb-on-outline" size={14} color="#FFD600" />
+                  <Text style={[styles.tipsText, { color: '#FFD600' }]}>
+                    {postureResult.tips.join(' · ')}
+                  </Text>
+                </View>
+              )}
             </>
           )}
         </View>
@@ -387,6 +294,12 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '700',
     letterSpacing: 0.2,
+  },
+  tipsText: {
+    fontSize: 10,
+    fontWeight: '600',
+    flex: 1,
+    flexWrap: 'wrap',
   },
   qualityBadge: {
     position: 'absolute',

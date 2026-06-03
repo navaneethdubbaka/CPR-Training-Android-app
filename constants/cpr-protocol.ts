@@ -64,7 +64,7 @@ export const CPR_STEPS: CPRStep[] = [
     autoAdvance: true,
     advanceCondition: 'camera_hand_detection',
     requiresCamera: true,
-     duration: 5,
+    duration: 2,
   },
   {
     id: 'compressions',

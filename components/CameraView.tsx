@@ -541,21 +541,24 @@
 // });
 
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
   Button,
   StyleSheet,
   Platform,
+  ActivityIndicator,
 } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
+import { PoseCameraView } from '@/components/PoseCameraView';
 
 interface CameraViewProps {
   onHandDetected?: () => void;
   showOverlay?: boolean;
   overlayText?: string;
   enableHandTracking?: boolean;
+  isPaused?: boolean;
 }
 
 export default function CameraViewComponent({
@@ -563,72 +566,149 @@ export default function CameraViewComponent({
   showOverlay = true,
   overlayText,
   enableHandTracking = false,
+  isPaused = false,
 }: CameraViewProps) {
   const [facing, setFacing] = useState<'front' | 'back'>('back');
 
   // Mobile permission
   const [permission, requestPermission] = useCameraPermissions();
 
-  // Web states
-  const videoRef = useRef<any>(null);
+  // Web camera
+  const streamRef = useRef<MediaStream | null>(null);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
   const [webError, setWebError] = useState<string | null>(null);
+  const [webLoading, setWebLoading] = useState(Platform.OS === 'web');
 
-  // 🎯 WEB CAMERA LOGIC
-  useEffect(() => {
-    if (Platform.OS === 'web') {
-      startWebCamera();
+  const attachStreamToVideo = useCallback((video: HTMLVideoElement | null) => {
+    if (!video || !streamRef.current) return;
+    video.srcObject = streamRef.current;
+    void video.play().catch(() => {});
+  }, []);
+
+  const setVideoRef = useCallback((node: HTMLVideoElement | null) => {
+    videoRef.current = node;
+    attachStreamToVideo(node);
+  }, [attachStreamToVideo]);
+
+  const stopWebStream = useCallback(() => {
+    streamRef.current?.getTracks().forEach(track => track.stop());
+    streamRef.current = null;
+    if (videoRef.current) {
+      videoRef.current.srcObject = null;
     }
   }, []);
 
-  const startWebCamera = async () => {
+  const startWebCamera = useCallback(async () => {
+    if (Platform.OS !== 'web') return;
+    setWebLoading(true);
+    setWebError(null);
+    stopWebStream();
     try {
-      if (!navigator.mediaDevices) {
-        setWebError('Camera not supported');
+      if (!navigator.mediaDevices?.getUserMedia) {
+        setWebError('Camera not supported in this browser');
         return;
       }
-
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: true,
+        video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } },
+        audio: false,
       });
-
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
+      streamRef.current = stream;
+      attachStreamToVideo(videoRef.current);
+    } catch (err: unknown) {
+      const name = err instanceof DOMException ? err.name : '';
+      if (name === 'NotAllowedError' || name === 'PermissionDeniedError') {
+        setWebError('Camera blocked — allow camera access for this site');
+      } else if (name === 'NotFoundError') {
+        setWebError('No camera found on this device');
+      } else {
+        setWebError('Could not start camera');
       }
-    } catch (err: any) {
-      console.log(err);
-      setWebError('Permission denied or no camera');
+    } finally {
+      setWebLoading(false);
     }
-  };
+  }, [attachStreamToVideo, stopWebStream]);
 
-  // 🎯 WEB UI
+  useEffect(() => {
+    if (Platform.OS === 'web') {
+      void startWebCamera();
+      return () => stopWebStream();
+    }
+  }, [startWebCamera, stopWebStream]);
+
+  // Web pose camera (MoveNet via TensorFlow.js)
+  if (Platform.OS === 'web' && enableHandTracking) {
+    return (
+      <View style={styles.wrapper}>
+        <View style={styles.frame}>
+          <PoseCameraView
+            onHandDetected={onHandDetected}
+            enableHandTracking={enableHandTracking}
+            showOverlay={showOverlay}
+            overlayText={overlayText}
+            isPaused={isPaused}
+          />
+        </View>
+      </View>
+    );
+  }
+
+  // Web plain camera preview (no pose)
   if (Platform.OS === 'web') {
     return (
       <View style={styles.wrapper}>
         <View style={styles.frame}>
           {webError ? (
             <View style={styles.center}>
-              <Text style={{ color: 'white' }}>{webError}</Text>
-              <Button title="Retry" onPress={startWebCamera} />
+              <Text style={styles.webStatusText}>{webError}</Text>
+              <Button title="Allow camera & retry" onPress={() => void startWebCamera()} />
+            </View>
+          ) : webLoading ? (
+            <View style={styles.center}>
+              <ActivityIndicator color="#fff" />
+              <Text style={styles.webStatusText}>Starting camera…</Text>
             </View>
           ) : (
             <video
-              ref={videoRef}
+              ref={setVideoRef}
               autoPlay
+              muted
               playsInline
               style={{
-    width: '100%',
-    height: '100%',
-    objectFit: 'cover',
-    transform: 'scaleX(-1)', // 🔥 REMOVE MIRROR
-  }}
+                width: '100%',
+                height: '100%',
+                objectFit: 'cover',
+                transform: 'scaleX(-1)',
+              }}
             />
           )}
+        </View>
+        {showOverlay && overlayText ? (
+          <View style={styles.webOverlayBanner}>
+            <Text style={styles.webOverlayText}>{overlayText}</Text>
+          </View>
+        ) : null}
+      </View>
+    );
+  }
+
+  // Pose camera (Vision + MoveNet) — hand_placement on Android only
+  if (Platform.OS === 'android' && enableHandTracking) {
+    return (
+      <View style={styles.wrapper}>
+        <View style={styles.frame}>
+          <PoseCameraView
+            onHandDetected={onHandDetected}
+            enableHandTracking={enableHandTracking}
+            showOverlay={showOverlay}
+            overlayText={overlayText}
+            isPaused={isPaused}
+          />
         </View>
       </View>
     );
   }
 
-  // 🎯 MOBILE LOGIC
+  // expo-camera fallback (compressions preview, iOS, etc.)
 
   useEffect(() => {
     requestPermission();
@@ -697,10 +777,29 @@ const styles = StyleSheet.create({
   },
 
 
-  webVideo: {
-    width: '100%',
-    height: '100%',
-    objectFit: 'cover',   // 🔥 IMPORTANT
+  webStatusText: {
+    color: '#fff',
+    fontSize: 13,
+    textAlign: 'center',
+    marginTop: 8,
+    paddingHorizontal: 16,
+  },
+
+  webOverlayBanner: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    backgroundColor: 'rgba(0,0,0,0.65)',
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+  },
+
+  webOverlayText: {
+    color: '#fff',
+    fontSize: 12,
+    fontWeight: '600',
+    textAlign: 'center',
   },
 
   center: {
