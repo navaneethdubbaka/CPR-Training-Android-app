@@ -46,7 +46,7 @@ Optional (only if using real Arduino over WebSocket):
 ## 1. Clone the repository
 
 ```bash
-git clone [<YOUR_REPO_URL>](https://github.com/navaneethdubbaka/CPR-Training-Android-app.git)
+git clone https://github.com/navaneethdubbaka/CPR-Training-Android-app.git
 cd CPR16
 ```
 
