@@ -5,7 +5,7 @@ import { StatusBar } from 'expo-status-bar';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { getColors } from '@/constants/colors';
 import { useTheme } from '@/contexts/ThemeContext';
-import { CPR_STEPS, CYCLES_TRAINING, CYCLES_TESTING, POST_AED_COMPRESSIONS_REQUIRED } from '@/constants/cpr-protocol';
+import { CPR_STEPS, CYCLES_TRAINING, CYCLES_TESTING, POST_AED_COMPRESSIONS_REQUIRED, COMPRESSIONS_PER_CYCLE, BREATHS_PER_CYCLE } from '@/constants/cpr-protocol';
 import { useCPRTraining } from '@/contexts/CPRTrainingContext';
 import { StepIndicator } from '@/components/StepIndicator';
 import { InstructionPanel } from '@/components/InstructionPanel';
@@ -111,9 +111,9 @@ useEffect(() => {
         return handPlacementVerified ? 'Hands verified' : 'Verifying hand position...';
       case 'compressions': {
         if (cyclePhase === 'compress') {
-          return `Compressions: ${cycleCompressionCount}/30 | Cycles: ${completedCycles}/${totalCycles}`;
+          return `Compressions: ${cycleCompressionCount}/${COMPRESSIONS_PER_CYCLE} | Cycles: ${completedCycles}/${totalCycles}`;
         }
-        return `Rescue breaths: ${cycleBreathCount}/2 | Cycles: ${completedCycles}/${totalCycles}`;
+        return `Rescue breaths: ${cycleBreathCount}/${BREATHS_PER_CYCLE} | Cycles: ${completedCycles}/${totalCycles}`;
       }
       case 'aed_pads': {
         const upper = sensorData.touchSensors.aedPadUpper ? 'Placed' : 'Waiting';
@@ -311,7 +311,7 @@ useEffect(() => {
 
       {showBreaths && (
         <BreathFeedback
-          count={metrics.breaths.count}
+          count={cycleBreathCount}
           currentPressure={metrics.breaths.currentPressure}
           goodBreaths={metrics.breaths.goodBreaths}
           totalBreaths={metrics.breaths.totalBreaths}

@@ -5,7 +5,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { getColors } from '@/constants/colors';
 import { useTheme } from '@/contexts/ThemeContext';
-import { CPR_STEPS } from '@/constants/cpr-protocol';
+import { CPR_STEPS, COMPRESSIONS_PER_CYCLE, BREATHS_PER_CYCLE } from '@/constants/cpr-protocol';
 import { VoicePrompt } from '@/components/VoicePrompt';
 
 interface InstructionPanelProps {
@@ -235,12 +235,12 @@ export function InstructionPanel({
             {cyclePhase === 'compress' ? (
               <View style={styles.cycleCount}>
                 <Text style={[styles.cycleCountNum, { color: Colors.accent }]}>
-                  {cycleCompressionCount}/30
+                  {cycleCompressionCount}/{COMPRESSIONS_PER_CYCLE}
                 </Text>
                 <Text style={[styles.cycleCountLabel, { color: Colors.textMuted }]}>Compressions</Text>
                 <View style={[styles.cycleBar, { backgroundColor: Colors.surfaceHighlight }]}>
                   <View style={[styles.cycleBarFill, {
-                    width: `${Math.min((cycleCompressionCount / 30) * 100, 100)}%` as any,
+                    width: `${Math.min((cycleCompressionCount / COMPRESSIONS_PER_CYCLE) * 100, 100)}%` as any,
                     backgroundColor: Colors.accent,
                   }]} />
                 </View>
@@ -248,7 +248,7 @@ export function InstructionPanel({
             ) : (
               <View style={styles.cycleCount}>
                 <Text style={[styles.cycleCountNum, { color: Colors.info }]}>
-                  {cycleBreathCount}/2
+                  {cycleBreathCount}/{BREATHS_PER_CYCLE}
                 </Text>
                 <Text style={[styles.cycleCountLabel, { color: Colors.textMuted }]}>Rescue Breaths</Text>
                 <Text style={[styles.cycleBreathHint, { color: Colors.textMuted }]}>

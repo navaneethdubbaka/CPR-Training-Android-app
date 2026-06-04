@@ -1,7 +1,7 @@
 
 
 import React, { createContext, useContext, useState, useCallback, useRef, useMemo, useEffect, type ReactNode } from 'react';
-import { CPR_STEPS, type CPRStepId, COMPRESSIONS_PER_CYCLE, COMPRESSION_ACCURACY_GATE, BREATHS_PER_CYCLE, CYCLES_TRAINING, CYCLES_TESTING, COMPRESSION_SETS_REQUIRED } from '@/constants/cpr-protocol';
+import { CPR_STEPS, type CPRStepId, BREATHS_PER_CYCLE, CYCLES_TRAINING, CYCLES_TESTING, COMPRESSION_SETS_REQUIRED } from '@/constants/cpr-protocol';
 import { arduinoSerial, type SensorData, type ArduinoConnectionStatus, type ArduinoConnectionMode, DEFAULT_SENSOR_DATA } from '@/lib/arduino-serial';
 import * as Haptics from 'expo-haptics';
 
@@ -182,6 +182,18 @@ export function CPRTrainingProvider({ children }: { children: ReactNode }) {
       const isColsMode = currentMode === 'cols';
       const training = isTrainingRef.current;
 
+      if (training && stepId === 'compressions') {
+        const phase = data.phase === 'BREATH' ? 'breathe' : 'compress';
+        cyclePhaseRef.current = phase;
+        setCyclePhase(phase);
+        cycleCompressionCountRef.current = data.cycleCompressionCount;
+        setCycleCompressionCount(data.cycleCompressionCount);
+        if (data.phase === 'BREATH') {
+          cycleBreathCountRef.current = data.breathCount;
+          setCycleBreathCount(data.breathCount);
+        }
+      }
+
       // 🟢 ✅ REAL-TIME UPDATE (EVERY FRAME)
       setMetrics(prev => ({
         ...prev,
@@ -236,29 +248,9 @@ export function CPRTrainingProvider({ children }: { children: ReactNode }) {
             },
           }));
 
-        } else if (stepId === 'compressions' && cyclePhaseRef.current === 'compress') {
-
-          if (cycleCompressionCountRef.current >= COMPRESSIONS_PER_CYCLE) {
-            return; // 🚫 STOP HARD
-          }
-
-          const newCount = cycleCompressionCountRef.current + 1;
-
-          // if (newCount >= COMPRESSIONS_PER_CYCLE) {
-          //   cycleCompressionCountRef.current = 0;
-          //   cyclePhaseRef.current = 'breathe';
-          //  // setCycleCompressionCount(0);
-          //   setCyclePhase('breathe');
-          // } else {
-          //   cycleCompressionCountRef.current = newCount;
-          //   setCycleCompressionCount(newCount);
-          // }
-
-          if (data.phase === 'BREATH') {
-            setCyclePhase('breathe');
-          } else {
-            setCyclePhase('compress');
-          }
+        } else if (stepId === 'compressions') {
+          cycleCompressionCountRef.current = data.cycleCompressionCount;
+          setCycleCompressionCount(data.cycleCompressionCount);
 
           setMetrics(prev => ({
             ...prev,
@@ -284,68 +276,27 @@ export function CPRTrainingProvider({ children }: { children: ReactNode }) {
         }
       }
 
-      // 🟡 BREATH LOGIC (UNCHANGED)
-      //if (data.airPressure > 10 && training && stepId === 'compressions' && cyclePhaseRef.current === 'breathe') {
-      if (data.breathDetected && training && stepId === 'compressions' && data.phase === 'BREATH') {
-        //const isGoodBreath = data.airPressure >= 15 && data.airPressure <= 25;
+      if (data.breathDetected && training && stepId === 'compressions') {
         const isGoodBreath = data.airPressure >= 0.4 && data.airPressure <= 0.9;
-        //const newBreathCount = cycleBreathCountRef.current + 1;
-        const newBreathCount = data.breathCount; // Sync breath count directly from Arduino for accuracy
+        const newBreathCount = data.breathCount;
 
-        // if (newBreathCount >= BREATHS_PER_CYCLE) {
+        cycleBreathCountRef.current = newBreathCount;
+        setCycleBreathCount(newBreathCount);
 
-        //   const newCycles = completedCyclesRef.current + 1;
-
-        //   // ✅ FULL RESET HERE (correct place)
-        //   cycleCompressionCountRef.current = 0;
-        //   cycleBreathCountRef.current = 0;
-
-        //  // cyclePhaseRef.current = 'compress';
-        //   completedCyclesRef.current = newCycles;
-
-        //   setCycleCompressionCount(0);
-        //   setCycleBreathCount(0);
-        //   setCyclePhase('compress');
-        //   setCompletedCycles(newCycles);
-
-        //   console.log("✅ Full CPR Cycle Completed:", newCycles);
-        // } else {
-        //   cycleBreathCountRef.current = newBreathCount;
-        //   setCycleBreathCount(newBreathCount);
-        // }
-
-        if (data.breathCount >= BREATHS_PER_CYCLE) {
-
+        if (newBreathCount >= BREATHS_PER_CYCLE) {
           const newCycles = completedCyclesRef.current + 1;
 
-          // ✅ show 2/2 immediately
-          cycleBreathCountRef.current = newBreathCount;
-          setCycleBreathCount(newBreathCount);
-
-          console.log("✅ 2 breaths done — waiting before advancing");
-
           setTimeout(() => {
-
             cycleCompressionCountRef.current = 0;
             cycleBreathCountRef.current = 0;
-
             cyclePhaseRef.current = 'compress';
             completedCyclesRef.current = newCycles;
 
             setCycleCompressionCount(0);
             setCycleBreathCount(0);
             setCyclePhase('compress');
-
-            // 🔥 THIS triggers auto-advance
             setCompletedCycles(newCycles);
-
-            console.log("➡️ Auto advancing after delay");
-
           }, 600);
-        }
-
-        if (data.breathDetected) {
-          console.log("🌬️ Breath UI Triggered", data.airPressure);
         }
 
         setMetrics(prev => ({

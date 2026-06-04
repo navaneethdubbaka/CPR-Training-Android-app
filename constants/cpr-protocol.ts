@@ -131,11 +131,11 @@ export const CPR_STEPS: CPRStep[] = [
 
 export const COMPRESSION_TARGET_RATE = { min: 100, max: 120, ideal: 110 };
 export const COMPRESSION_TARGET_DEPTH = { min: 5, max: 6, ideal: 5.5 };
-export const COMPRESSIONS_PER_CYCLE = 5;  
-export const COMPRESSIONS_PER_SET = 5; // For testing/demo purposes, set to 5 instead of 30
+export const COMPRESSIONS_PER_CYCLE = 30;
+export const COMPRESSIONS_PER_SET = COMPRESSIONS_PER_CYCLE;
 export const BREATHS_PER_CYCLE = 2;
 export const COMPRESSION_ACCURACY_GATE = 0.8;
-export const CYCLES_TRAINING = 1; //Can be set for 5
+export const CYCLES_TRAINING = 5;
 export const CYCLES_TESTING = 1;
 export const POST_AED_COMPRESSIONS_REQUIRED = 2;
 export const COMPRESSION_SETS_REQUIRED = CYCLES_TRAINING;

@@ -4,7 +4,7 @@ import { nativeUsbSerial, type UsbDevice } from './usb-serial';
 import { bleSerial, type BleDevice } from './ble-serial';
 import { tcpSerial, type TcpConfig } from './tcp-serial';
 import { webSerial } from './webserial';
-import { COMPRESSIONS_PER_CYCLE } from '@/constants/cpr-protocol';
+import { COMPRESSIONS_PER_CYCLE, BREATHS_PER_CYCLE } from '@/constants/cpr-protocol';
 
 const INVERT_STORAGE_KEY = 'cpr_channel_inverts';
 const ULTRASONIC_OFFSET_KEY = 'cpr_ultrasonic_offset';
@@ -32,6 +32,7 @@ export interface SensorData {
   compressionPeak?: number;
   breathDetected: boolean;        // ONE breath cycle completed
   breathCount: number;           // Number of breaths in current cycle
+  cycleCompressionCount: number; // Compressions in current COMPRESSION phase (0..30)
   airPressure: number;
   phase: 'COMPRESSION' | 'BREATH';
   timestamp: number;
@@ -158,6 +159,7 @@ const DEFAULT_SENSOR_DATA: SensorData = {
   compressionDepth: 0,
   breathDetected: false,
   breathCount: 0,
+  cycleCompressionCount: 0,
   compressionRate: 0,
   compressionDetected: false,
   airPressure: 0,
@@ -560,55 +562,47 @@ class ArduinoSerialManager {
     const rawPressure = getVal('breathPressure');
     const pressureVal = Math.max(0, rawPressure - this.breathOffset);
 
-    // 🔥 FULL PHASE CONTROL HERE
     let compressionDetected = false;
     let breathDetected = false;
+    let emitCycleCompressionCount = this.cycleCompressionCount;
+    let emitBreathCount = this.cycleBreathCount;
+    let emitPhase: 'COMPRESSION' | 'BREATH' = this.phase;
 
     if (this.phase === 'COMPRESSION') {
       compressionDetected = this.detectCompressionCycle(depthVal);
 
       if (compressionDetected) {
         this.cycleCompressionCount++;
-
-        console.log("Compression Count:", this.cycleCompressionCount);
+        emitCycleCompressionCount = this.cycleCompressionCount;
+        emitPhase = 'COMPRESSION';
 
         if (this.cycleCompressionCount >= COMPRESSIONS_PER_CYCLE) {
-          console.log("➡️ Switching to BREATH phase");
-
+          emitCycleCompressionCount = COMPRESSIONS_PER_CYCLE;
+          emitPhase = 'BREATH';
           this.phase = 'BREATH';
           this.cycleCompressionCount = 0;
-
-          // reset breath state
           this.breathState = 'IDLE';
           this.peakPressure = 0;
         }
       }
-    }
-
-    else if (this.phase === 'BREATH') {
+    } else if (this.phase === 'BREATH') {
       breathDetected = this.detectBreathCycle(pressureVal);
 
       if (breathDetected) {
         this.cycleBreathCount++;
+        emitBreathCount = this.cycleBreathCount;
+        emitPhase = 'BREATH';
 
-        console.log("Breath Count:", this.cycleBreathCount);
-
-        if (this.cycleBreathCount >= 2) {
-          console.log("➡️ Switching to COMPRESSION phase");
-
+        if (this.cycleBreathCount >= BREATHS_PER_CYCLE) {
+          emitBreathCount = BREATHS_PER_CYCLE;
+          emitPhase = 'BREATH';
           this.phase = 'COMPRESSION';
           this.cycleBreathCount = 0;
-
-          // reset compression state
           this.compressionState = 'IDLE';
           this.peakDepth = 0;
         }
       }
     }
-    console.log("CURRENT PHASE:", this.phase, "Pressure:", pressureVal);
-
-    //for testing Breath Detection 
-    //const breathDetected = this.detectBreathCycle(pressureVal);
 
     return {
       touchSensors: {
@@ -625,10 +619,11 @@ class ArduinoSerialManager {
       compressionDetected,
       compressionPeak: this.peakDepth,
       breathDetected: breathDetected,
-      breathCount: this.cycleBreathCount,
+      breathCount: emitBreathCount,
+      cycleCompressionCount: emitCycleCompressionCount,
 
       airPressure: pressureVal,
-      phase: this.phase,
+      phase: emitPhase,
       timestamp: Date.now(),
     };
   }
