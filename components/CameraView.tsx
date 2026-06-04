@@ -635,6 +635,15 @@ export default function CameraViewComponent({
     }
   }, [startWebCamera, stopWebStream]);
 
+  const useNativePoseCamera = Platform.OS === 'android' && enableHandTracking;
+  const useExpoCamera = Platform.OS !== 'web' && !useNativePoseCamera;
+
+  useEffect(() => {
+    if (useExpoCamera) {
+      void requestPermission();
+    }
+  }, [useExpoCamera, requestPermission]);
+
   // Web pose camera (MoveNet via TensorFlow.js)
   if (Platform.OS === 'web' && enableHandTracking) {
     return (
@@ -691,8 +700,8 @@ export default function CameraViewComponent({
     );
   }
 
-  // Pose camera (Vision + MoveNet) — hand_placement on Android only
-  if (Platform.OS === 'android' && enableHandTracking) {
+  // Pose camera (Vision + MoveNet) — hand_placement / testing preview on Android
+  if (useNativePoseCamera) {
     return (
       <View style={styles.wrapper}>
         <View style={styles.frame}>
@@ -708,11 +717,7 @@ export default function CameraViewComponent({
     );
   }
 
-  // expo-camera fallback (compressions preview, iOS, etc.)
-
-  useEffect(() => {
-    requestPermission();
-  }, []);
+  // expo-camera (early steps, compressions preview, iOS)
 
   if (!permission) {
     return (

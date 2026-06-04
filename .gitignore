@@ -79,6 +79,7 @@ venv/
 
 # Replit agent runtime (skills cache, workflow logs, tasks)
 .local/
+android/local.properties
 
 # Replit agent scratch in attached_assets (keep intentional files, e.g. *.ino)
 attached_assets/Pasted-*

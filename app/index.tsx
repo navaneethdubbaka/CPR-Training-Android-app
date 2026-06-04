@@ -129,10 +129,10 @@ useEffect(() => {
     }
   }, [currentStep, sensorData, stepTimer, handPlacementVerified, cyclePhase, cycleCompressionCount, cycleBreathCount, completedCycles, totalCycles, postAedCompressionCount]);
 
-  const showCamera = currentStep?.requiresCamera || currentStep?.id === 'compressions';
+  const showCameraStep = currentStep?.requiresCamera || currentStep?.id === 'compressions';
   const showAED = currentStep?.id === 'aed_pads' || currentStep?.id === 'aed_analyze' || currentStep?.id === 'aed_shock';
-  const showWebTestingPreview = Platform.OS === 'web' && isTesting && !showCamera && !showAED;
-  const showVisualCamera = showCamera || showWebTestingPreview;
+  const showVisualCamera = true;
+  const showPoseTracking = true;
   const showCompressions = currentStep?.id === 'compressions' && cyclePhase === 'compress';
   const showPostAedCompressions = currentStep?.id === 'post_aed_compressions';
   const showBreaths = currentStep?.id === 'compressions' && cyclePhase === 'breathe';
@@ -218,8 +218,8 @@ useEffect(() => {
     ? 'Position hands at center of chest'
     : currentStep?.id === 'compressions'
     ? 'Monitoring compression technique'
-    : showWebTestingPreview
-    ? 'Pose preview — hold good posture at Hand Placement to advance'
+    : showPoseTracking
+    ? 'Live pose tracking'
     : '';
 
   const renderVisualPanel = () => (
@@ -230,10 +230,7 @@ useEffect(() => {
             showOverlay={!!cameraOverlayText}
             overlayText={cameraOverlayText}
             onHandDetected={currentStep?.id === 'hand_placement' ? verifyHandPlacement : undefined}
-            enableHandTracking={
-              currentStep?.id === 'hand_placement' ||
-              (Platform.OS === 'web' && isTesting)
-            }
+            enableHandTracking={showPoseTracking}
             isPaused={isPaused}
           />
         </View>
@@ -249,17 +246,6 @@ useEffect(() => {
           shockDelivered={aedShockDelivered}
           onShockComplete={advanceStep}
         />
-      )}
-
-      {!showVisualCamera && !showAED && (
-        <View style={styles.placeholderPanel}>
-          <View style={styles.manikinVisual}>
-            <MaterialCommunityIcons name="human" size={isNarrow ? 60 : 80} color={Colors.surfaceHighlight} />
-            <Text style={[styles.placeholderHint, { color: Colors.textMuted }]}>
-              Camera preview at Hand Placement and Compressions
-            </Text>
-          </View>
-        </View>
       )}
 
       {!hardwareOnly && (

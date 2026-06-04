@@ -42,6 +42,7 @@ const ERROR_LOG_INTERVAL_MS = 5000;
 export function usePoseDetector(
   enabled: boolean,
   onPostureResult: (keypoints: PoseKeypoint[], result: CPRPostureResult) => void,
+  onInferenceTick?: () => void,
 ): PoseDetectorHook {
   const plugin = useTensorflowModel(LOCAL_MODEL);
   const modelReady = plugin.state === 'loaded';
@@ -50,8 +51,9 @@ export function usePoseDetector(
   const handleResult = useRunOnJS((flat: number[]) => {
     const kps = parseKeypointsFromFlat(flat);
     const result = analyzeCPRPosture(kps);
+    onInferenceTick?.();
     onPostureResult(kps, result);
-  }, [onPostureResult]);
+  }, [onPostureResult, onInferenceTick]);
 
   const handleError = useRunOnJS((msg: string) => {
     console.warn('[PoseDetector] Frame inference error:', msg);
@@ -59,13 +61,15 @@ export function usePoseDetector(
 
   const frameProcessor = useFrameProcessor((frame) => {
     'worklet';
-    if (!enabled || plugin.state !== 'loaded') return;
+    if (!enabled) return;
     runAtTargetFps(7, () => {
       'worklet';
       try {
+        const model = plugin.model;
+        if (model == null) return;
         const buffer = frame.toArrayBuffer();
         const input = preprocessRGBFrame(buffer, frame.width, frame.height);
-        const outputs = plugin.model.runSync([input]);
+        const outputs = model.runSync([input]);
         const raw = outputs[0];
         const arr: number[] = [];
         for (let i = 0; i < 51; i++) {
@@ -80,7 +84,7 @@ export function usePoseDetector(
         }
       }
     });
-  }, [plugin, enabled, handleResult, handleError, lastErrorAt]);
+  }, [plugin.model, plugin.state, enabled, handleResult, handleError, lastErrorAt]);
 
   return {
     state: plugin.state as PoseDetectorState,

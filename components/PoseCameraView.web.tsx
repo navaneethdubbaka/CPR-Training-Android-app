@@ -51,6 +51,7 @@ export function PoseCameraView({
     armsVisible: false, armsAreStraight: false, shouldersOverWrists: false, tips: [],
   });
   const [viewSize, setViewSize] = useState({ width: 0, height: 0 });
+  const [videoSize, setVideoSize] = useState({ width: 0, height: 0 });
 
   const attachStreamToVideo = useCallback((video: HTMLVideoElement | null) => {
     if (!video || !streamRef.current) return;
@@ -58,10 +59,23 @@ export function PoseCameraView({
     void video.play().catch(() => {});
   }, []);
 
+  const syncVideoSize = useCallback((video: HTMLVideoElement | null) => {
+    if (!video) return;
+    const w = video.videoWidth;
+    const h = video.videoHeight;
+    if (w > 0 && h > 0) {
+      setVideoSize(prev => (prev.width === w && prev.height === h ? prev : { width: w, height: h }));
+    }
+  }, []);
+
   const setVideoRef = useCallback((node: HTMLVideoElement | null) => {
     videoRef.current = node;
     attachStreamToVideo(node);
-  }, [attachStreamToVideo]);
+    syncVideoSize(node);
+    if (node) {
+      node.onloadedmetadata = () => syncVideoSize(node);
+    }
+  }, [attachStreamToVideo, syncVideoSize]);
 
   const stopWebStream = useCallback(() => {
     streamRef.current?.getTracks().forEach(t => t.stop());
@@ -125,7 +139,7 @@ export function PoseCameraView({
 
   const detectorEnabled = enableHandTracking && !isPaused;
   const { state: modelState, errorMessage: modelError, backend: tfBackend, retry: retryModel } =
-    useWebPoseDetector(videoRef, detectorEnabled, handlePostureResult, true);
+    useWebPoseDetector(videoRef, detectorEnabled, handlePostureResult, false);
 
   const handleLayout = useCallback((e: { nativeEvent: { layout: { width: number; height: number } } }) => {
     const { width, height } = e.nativeEvent.layout;
@@ -169,13 +183,18 @@ export function PoseCameraView({
       </View>
 
       {enableHandTracking && viewSize.width > 0 && (
-        <PoseSkeletonOverlay
-          keypoints={keypoints}
-          result={postureResult}
-          width={viewSize.width}
-          height={viewSize.height}
-          Colors={Colors}
-        />
+        <View style={styles.overlayLayer} pointerEvents="none" collapsable={false}>
+          <PoseSkeletonOverlay
+            keypoints={keypoints}
+            result={postureResult}
+            width={viewSize.width}
+            height={viewSize.height}
+            videoWidth={videoSize.width}
+            videoHeight={videoSize.height}
+            Colors={Colors}
+            mirrorX
+          />
+        </View>
       )}
 
       {enableHandTracking && (
@@ -269,6 +288,10 @@ const styles = StyleSheet.create({
   },
   videoFrame: {
     ...StyleSheet.absoluteFillObject,
+  },
+  overlayLayer: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 20,
   },
   center: {
     flex: 1,

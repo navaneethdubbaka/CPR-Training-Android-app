@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
-import { View, Text, StyleSheet, Pressable, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, Pressable, ActivityIndicator, Platform } from 'react-native';
 import { Camera, useCameraDevice, useCameraDevices, useCameraFormat, useCameraPermission } from 'react-native-vision-camera';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -40,6 +40,7 @@ export function PoseCameraView({
   });
   const [viewSize, setViewSize] = useState({ width: 0, height: 0 });
   const [cameraFacing, setCameraFacing] = useState<'front' | 'back'>('back');
+  const [inferenceCount, setInferenceCount] = useState(0);
 
   const goodSinceRef = useRef<number | null>(null);
   const handDetectedFiredRef = useRef(false);
@@ -91,9 +92,14 @@ export function PoseCameraView({
 
   const detectorEnabled = enableHandTracking && !isPaused;
 
+  const handleInferenceTick = useCallback(() => {
+    setInferenceCount(c => c + 1);
+  }, []);
+
   const { state: modelState, frameProcessor } = usePoseDetector(
     detectorEnabled,
     handlePostureResult,
+    handleInferenceTick,
   );
 
   const handleLayout = useCallback((e: { nativeEvent: { layout: { width: number; height: number } } }) => {
@@ -143,6 +149,15 @@ export function PoseCameraView({
   }
 
   const modelReady = modelState === 'loaded';
+  const poseTracking = inferenceCount > 0;
+  const visibleJoints = keypoints.filter(kp => kp.score >= 0.1).length;
+
+  const statusLabel =
+    modelState === 'loading' ? 'Loading model…' :
+    modelState === 'error' ? 'Model error' :
+    !modelReady ? 'Model unavailable' :
+    !poseTracking ? 'Waiting for body…' :
+    `Tracking · ${visibleJoints} joints`;
 
   const qualityColor =
     postureResult.quality === 'good' ? '#00E676' :
@@ -162,28 +177,31 @@ export function PoseCameraView({
         isActive={true}
         pixelFormat="rgb"
         frameProcessor={frameProcessor}
+        androidPreviewViewType={Platform.OS === 'android' ? 'texture-view' : undefined}
       />
 
       {enableHandTracking && viewSize.width > 0 && (
-        <PoseSkeletonOverlay
-          keypoints={keypoints}
-          result={postureResult}
-          width={viewSize.width}
-          height={viewSize.height}
-          Colors={Colors}
-        />
+        <View style={styles.overlayLayer} pointerEvents="none" collapsable={false}>
+          <PoseSkeletonOverlay
+            keypoints={keypoints}
+            result={postureResult}
+            width={viewSize.width}
+            height={viewSize.height}
+            Colors={Colors}
+            mirrorX={cameraFacing === 'front'}
+          />
+        </View>
       )}
 
       {enableHandTracking && (
         <View style={styles.feedbackPanel}>
-          {!modelReady ? (
-            <View style={styles.feedbackRow}>
-              <ActivityIndicator size="small" color="#FFD600" />
-              <Text style={[styles.feedbackText, { color: '#FFD600' }]}>
-                {modelState === 'loading' ? 'Loading pose model…' : 'Model unavailable'}
-              </Text>
-            </View>
-          ) : (
+          <View style={styles.feedbackRow}>
+            {!modelReady && <ActivityIndicator size="small" color="#FFD600" />}
+            <Text style={[styles.feedbackText, { color: '#FFD600' }]}>
+              {statusLabel}
+            </Text>
+          </View>
+          {modelReady && poseTracking && (
             <>
               <View style={styles.feedbackRow}>
                 <Text style={[styles.feedbackText, { color: postureResult.armsAreStraight ? '#00E676' : '#E53935' }]}>
@@ -204,6 +222,11 @@ export function PoseCameraView({
                 </View>
               )}
             </>
+          )}
+          {modelReady && !poseTracking && (
+            <Text style={[styles.tipsText, { color: Colors.textSecondary }]}>
+              Stand back so shoulders, arms, and hands are in frame
+            </Text>
           )}
         </View>
       )}
@@ -239,9 +262,13 @@ export function PoseCameraView({
         <MaterialCommunityIcons
           name="eye-circle"
           size={10}
-          color={modelReady ? '#00E676' : Colors.textMuted}
+          color={poseTracking ? '#00E676' : modelState === 'loading' ? '#FFD600' : Colors.textMuted}
         />
-        <Text style={[styles.badgeText, { color: Colors.text }]}>POSE</Text>
+        <Text style={[styles.badgeText, { color: Colors.text }]}>
+          {modelState === 'loading' ? 'POSE · …' :
+           modelState === 'error' ? 'POSE · ERR' :
+           poseTracking ? 'POSE · ON' : 'POSE · idle'}
+        </Text>
       </View>
     </View>
   );
@@ -253,6 +280,11 @@ const styles = StyleSheet.create({
     backgroundColor: '#000',
     borderRadius: 12,
     overflow: 'hidden',
+  },
+  overlayLayer: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 20,
+    elevation: 20,
   },
   center: {
     flex: 1,
@@ -284,6 +316,8 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     paddingHorizontal: 12,
     paddingVertical: 8,
+    zIndex: 30,
+    elevation: 30,
   },
   feedbackRow: {
     flexDirection: 'row',
@@ -364,6 +398,8 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     paddingHorizontal: 7,
     paddingVertical: 3,
+    zIndex: 30,
+    elevation: 30,
   },
   badgeText: {
     fontSize: 9,

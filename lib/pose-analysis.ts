@@ -69,6 +69,7 @@ function calcAngle(a: PoseKeypoint, b: PoseKeypoint, c: PoseKeypoint): number {
   return (Math.acos(cos) * 180) / Math.PI;
 }
 
+/** Normalize MoveNet output to 0–1 for overlay (handles pixel coords and slight >1 values). */
 export function parseKeypointsFromFlat(flat: number[]): PoseKeypoint[] {
   const kps: PoseKeypoint[] = [];
   for (let i = 0; i < 17; i++) {
@@ -78,7 +79,24 @@ export function parseKeypointsFromFlat(flat: number[]): PoseKeypoint[] {
       score: flat[i * 3 + 2] ?? 0,
     });
   }
-  return kps;
+
+  const maxCoord = kps.reduce((m, k) => Math.max(m, k.x, k.y), 0);
+  let scale = 1;
+  if (maxCoord > 1) {
+    scale = maxCoord > 20 ? 192 : maxCoord;
+  }
+
+  return kps.map(k => {
+    let score = k.score;
+    if (score > 1) {
+      score = 1 / (1 + Math.exp(-score));
+    }
+    return {
+      x: Math.min(1, Math.max(0, k.x / scale)),
+      y: Math.min(1, Math.max(0, k.y / scale)),
+      score: Math.min(1, Math.max(0, score)),
+    };
+  });
 }
 
 export function analyzeCPRPosture(keypoints: PoseKeypoint[]): CPRPostureResult {
