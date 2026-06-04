@@ -46,11 +46,11 @@ Optional (only if using real Arduino over WebSocket):
 ## 1. Clone the repository
 
 ```bash
-git clone <YOUR_REPO_URL>
+git clone https://github.com/navaneethdubbaka/CPR-Training-Android-app.git
 cd CPR16
 ```
 
-Replace `<YOUR_REPO_URL>` with the Git URL your team provides (HTTPS or SSH).
+Replace `https://github.com/navaneethdubbaka/CPR-Training-Android-app.git` with the Git URL your team provides (HTTPS or SSH).
 
 ---
 
