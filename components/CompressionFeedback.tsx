@@ -1,11 +1,12 @@
 import React, { useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, Platform } from 'react-native';
+import { View, Text, StyleSheet } from 'react-native';
 import Animated, { useSharedValue, useAnimatedStyle, withTiming, withRepeat, withSequence } from 'react-native-reanimated';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import * as Speech from 'expo-speech';
 import { getColors } from '@/constants/colors';
 import { useTheme } from '@/contexts/ThemeContext';
 import { COMPRESSION_TARGET_RATE, COMPRESSION_TARGET_DEPTH, COMPRESSIONS_PER_SET, COMPRESSION_SETS_REQUIRED } from '@/constants/cpr-protocol';
+import type { CPRPostureResult } from '@/lib/pose-analysis';
+import { pickPoseCue, pickSensorCue, speakCoachingCue } from '@/lib/coaching-cues';
 
 interface CompressionSet {
   count: number;
@@ -22,6 +23,8 @@ interface CompressionFeedbackProps {
   avgDepth: number;
   goodCount: number;
   totalCount: number;
+  postureResult?: CPRPostureResult | null;
+  enablePoseVoiceCues?: boolean;
   sets?: CompressionSet[];
   currentSetIndex?: number;
   setsRequired?: number;
@@ -118,16 +121,6 @@ function SetIndicator({
   );
 }
 
-function speakCue(text: string) {
-  try {
-    Speech.speak(text, {
-      language: 'en-US',
-      pitch: 1.0,
-      rate: 0.95,
-    });
-  } catch (_) {}
-}
-
 function GaugeBar({
   value,
   min,
@@ -176,10 +169,12 @@ function GaugeBar({
 function CorrectionSidebar({
   currentRate,
   currentDepth,
+  postureResult,
   Colors,
 }: {
   currentRate: number;
   currentDepth: number;
+  postureResult?: CPRPostureResult | null;
   Colors: ReturnType<typeof getColors>;
 }) {
   const rateOk = currentRate >= COMPRESSION_TARGET_RATE.min && currentRate <= COMPRESSION_TARGET_RATE.max;
@@ -188,6 +183,10 @@ function CorrectionSidebar({
   const depthColor = getDepthColor(currentDepth, Colors);
 
   const positionOk = rateOk && depthOk;
+  const postureOk = postureResult?.quality === 'good';
+  const overallOk = postureResult ? (positionOk && postureOk) : positionOk;
+  const poseTip =
+    postureResult?.tips?.length ? postureResult.tips[0] : undefined;
 
   return (
     <View style={[sidebarStyles.container, { backgroundColor: Colors.surfaceLight, borderColor: Colors.border }]}>
@@ -249,17 +248,70 @@ function CorrectionSidebar({
         </View>
       </View>
 
+      {postureResult ? (
+        postureResult.quality === 'none' ? (
+          <View style={sidebarStyles.cueRow}>
+            <View style={[sidebarStyles.cueChip, {
+              flex: 1,
+              backgroundColor: 'rgba(255,214,0,0.12)',
+              borderColor: Colors.warning,
+            }]}>
+              <MaterialCommunityIcons name="camera-outline" size={13} color={Colors.warning} />
+              <Text style={[sidebarStyles.cueText, { color: Colors.warning }]}>
+                {poseTip ?? 'Raise hands into camera view'}
+              </Text>
+            </View>
+          </View>
+        ) : (
+          <View style={sidebarStyles.cueRow}>
+            <View style={[sidebarStyles.cueChip, {
+              backgroundColor: postureResult.armsAreStraight ? 'rgba(0,230,118,0.12)' : 'rgba(229,57,53,0.12)',
+              borderColor: postureResult.armsAreStraight ? Colors.feedbackGood : Colors.feedbackBad,
+            }]}>
+              <MaterialCommunityIcons
+                name={postureResult.armsAreStraight ? 'arm-flex' : 'arm-flex-outline'}
+                size={13}
+                color={postureResult.armsAreStraight ? Colors.feedbackGood : Colors.feedbackBad}
+              />
+              <Text style={[sidebarStyles.cueText, { color: postureResult.armsAreStraight ? Colors.feedbackGood : Colors.feedbackBad }]}>
+                {postureResult.armsAreStraight ? 'Arms straight' : 'Straighten arms'}
+              </Text>
+            </View>
+
+            <View style={[sidebarStyles.cueChip, {
+              backgroundColor: postureResult.shouldersOverWrists ? 'rgba(0,230,118,0.12)' : 'rgba(229,57,53,0.12)',
+              borderColor: postureResult.shouldersOverWrists ? Colors.feedbackGood : Colors.feedbackBad,
+            }]}>
+              <MaterialCommunityIcons
+                name="human-handsdown"
+                size={13}
+                color={postureResult.shouldersOverWrists ? Colors.feedbackGood : Colors.feedbackBad}
+              />
+              <Text style={[sidebarStyles.cueText, { color: postureResult.shouldersOverWrists ? Colors.feedbackGood : Colors.feedbackBad }]}>
+                {postureResult.shouldersOverWrists ? 'Shoulders stacked' : 'Lean forward'}
+              </Text>
+            </View>
+          </View>
+        )
+      ) : null}
+
       <View style={[sidebarStyles.positionIndicator, {
-        backgroundColor: positionOk ? 'rgba(0,230,118,0.15)' : 'rgba(255,255,255,0.06)',
-        borderColor: positionOk ? Colors.feedbackGood : Colors.border,
+        backgroundColor: overallOk ? 'rgba(0,230,118,0.15)' : 'rgba(255,255,255,0.06)',
+        borderColor: overallOk ? Colors.feedbackGood : Colors.border,
       }]}>
         <MaterialCommunityIcons
-          name={positionOk ? 'hand-heart' : 'hand-pointing-down'}
+          name={overallOk ? 'hand-heart' : 'hand-pointing-down'}
           size={14}
-          color={positionOk ? Colors.feedbackGood : Colors.textMuted}
+          color={overallOk ? Colors.feedbackGood : Colors.textMuted}
         />
-        <Text style={[sidebarStyles.positionText, { color: positionOk ? Colors.feedbackGood : Colors.textMuted }]}>
-          {positionOk ? 'Technique optimal' : currentRate === 0 && currentDepth === 0 ? 'Begin compressions' : 'Adjust technique'}
+        <Text style={[sidebarStyles.positionText, { color: overallOk ? Colors.feedbackGood : Colors.textMuted }]}>
+          {overallOk
+            ? 'Technique optimal'
+            : currentRate === 0 && currentDepth === 0
+              ? 'Begin compressions'
+              : poseTip
+                ? poseTip
+                : 'Adjust technique'}
         </Text>
       </View>
     </View>
@@ -268,6 +320,8 @@ function CorrectionSidebar({
 
 export function CompressionFeedback({
   count, currentRate, currentDepth, avgRate, avgDepth, goodCount, totalCount,
+  postureResult,
+  enablePoseVoiceCues = false,
   sets, currentSetIndex = 0, setsRequired = COMPRESSION_SETS_REQUIRED, showSets = true,
 }: CompressionFeedbackProps) {
   const { theme } = useTheme();
@@ -277,6 +331,8 @@ export function CompressionFeedback({
   const lastCueTime = useRef(0);
   const lastRateRef = useRef(currentRate);
   const lastDepthRef = useRef(currentDepth);
+  const poseCueRef = useRef<string | null>(null);
+  const poseCueSinceRef = useRef<number | null>(null);
 
   const currentSet = sets?.[currentSetIndex];
   const displayCount = currentSet ? currentSet.count : count;
@@ -306,29 +362,37 @@ export function CompressionFeedback({
 
     const now = Date.now();
     if (now - lastCueTime.current < 3000) return;
-    if (currentRate === 0 && currentDepth === 0) return;
 
-    const rateTooSlow = currentRate > 0 && currentRate < COMPRESSION_TARGET_RATE.min;
-    const rateTooFast = currentRate > 0 && currentRate > COMPRESSION_TARGET_RATE.max;
-    const depthTooShallow = currentDepth > 0 && currentDepth < COMPRESSION_TARGET_DEPTH.min;
-    const depthTooDeep = currentDepth > 0 && currentDepth > COMPRESSION_TARGET_DEPTH.max;
-
-    let cue: string | null = null;
-    if (depthTooShallow) {
-      cue = 'Press harder';
-    } else if (depthTooDeep) {
-      cue = 'Press less deeply';
-    } else if (rateTooSlow) {
-      cue = 'Speed up';
-    } else if (rateTooFast) {
-      cue = 'Slow down';
-    }
-
-    if (cue) {
+    const sensorCue = pickSensorCue(currentRate, currentDepth);
+    if (sensorCue) {
       lastCueTime.current = now;
-      speakCue(cue);
+      speakCoachingCue(sensorCue);
+      poseCueRef.current = null;
+      poseCueSinceRef.current = null;
+      return;
     }
-  }, [currentRate, currentDepth]);
+
+    if (!enablePoseVoiceCues || !postureResult) return;
+
+    const poseCue = pickPoseCue(postureResult);
+    if (!poseCue) {
+      poseCueRef.current = null;
+      poseCueSinceRef.current = null;
+      return;
+    }
+
+    if (poseCueRef.current !== poseCue) {
+      poseCueRef.current = poseCue;
+      poseCueSinceRef.current = now;
+      return;
+    }
+
+    if (poseCueSinceRef.current && now - poseCueSinceRef.current >= 1500) {
+      lastCueTime.current = now;
+      speakCoachingCue(poseCue);
+      poseCueSinceRef.current = now;
+    }
+  }, [currentRate, currentDepth, enablePoseVoiceCues, postureResult]);
 
   const heartStyle = useAnimatedStyle(() => ({
     transform: [{ scale: pulseScale.value }],
@@ -359,7 +423,7 @@ export function CompressionFeedback({
         <SetIndicator sets={sets} currentSetIndex={currentSetIndex} setsRequired={setsRequired} Colors={Colors} />
       )}
 
-      <CorrectionSidebar currentRate={currentRate} currentDepth={currentDepth} Colors={Colors} />
+  <CorrectionSidebar currentRate={currentRate} currentDepth={currentDepth} postureResult={postureResult} Colors={Colors} />
 
       <View style={styles.qualityRow}>
         <MaterialCommunityIcons name="star" size={16} color={Colors.warning} />

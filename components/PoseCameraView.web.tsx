@@ -21,6 +21,7 @@ const GOOD_QUALITY_HOLD_MS = 1500;
 interface Props {
   onHandDetected?: () => void;
   onPoseQuality?: (quality: CPRPostureResult['quality']) => void;
+  onPostureResult?: (result: CPRPostureResult) => void;
   enableHandTracking?: boolean;
   showOverlay?: boolean;
   overlayText?: string;
@@ -30,6 +31,7 @@ interface Props {
 export function PoseCameraView({
   onHandDetected,
   onPoseQuality,
+  onPostureResult,
   enableHandTracking = true,
   showOverlay,
   overlayText,
@@ -121,6 +123,7 @@ export function PoseCameraView({
     setKeypoints(kps);
     setPostureResult(result);
     onPoseQuality?.(result.quality);
+    onPostureResult?.(result);
 
     if (isPaused || !enableHandTracking) return;
 
@@ -135,7 +138,7 @@ export function PoseCameraView({
       goodSinceRef.current = null;
       handDetectedFiredRef.current = false;
     }
-  }, [onHandDetected, onPoseQuality, isPaused, enableHandTracking]);
+  }, [onHandDetected, onPoseQuality, onPostureResult, isPaused, enableHandTracking]);
 
   const detectorEnabled = enableHandTracking && !isPaused;
   const { state: modelState, errorMessage: modelError, backend: tfBackend, retry: retryModel } =

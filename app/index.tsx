@@ -20,10 +20,14 @@ import { StartScreen } from '@/components/StartScreen';
 import { SettingsModal } from '@/components/SettingsModal';
 import { EnduranceScreen } from '@/components/EnduranceScreen';
 import { StepVideo } from '@/components/StepVideo';
+import type { CPRPostureResult } from '@/lib/pose-analysis';
+
+const ENABLE_POSE_VOICE_CUES = Platform.OS === 'web';
 
 export default function TrainingScreen() {
   const [showSettings, setShowSettings] = useState(false);
   const [voiceCompleted, setVoiceCompleted] = useState(false);
+  const [postureResult, setPostureResult] = useState<CPRPostureResult | null>(null);
   const insets = useSafeAreaInsets();
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
   const topInset = Platform.OS === 'web' ? 67 : insets.top;
@@ -230,6 +234,7 @@ useEffect(() => {
             showOverlay={!!cameraOverlayText}
             overlayText={cameraOverlayText}
             onHandDetected={currentStep?.id === 'hand_placement' ? verifyHandPlacement : undefined}
+            onPostureResult={setPostureResult}
             enableHandTracking={showPoseTracking}
             isPaused={isPaused}
           />
@@ -302,6 +307,8 @@ useEffect(() => {
           avgDepth={metrics.compressions.avgDepth}
           goodCount={metrics.compressions.goodCompressions}
           totalCount={metrics.compressions.totalCompressions}
+          postureResult={showCompressions ? postureResult : undefined}
+          enablePoseVoiceCues={ENABLE_POSE_VOICE_CUES}
           sets={undefined}
           currentSetIndex={undefined}
           setsRequired={totalCycles}

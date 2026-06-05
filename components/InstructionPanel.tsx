@@ -160,7 +160,7 @@ export function InstructionPanel({
                 color={(voiceCompleted ?? false) ? Colors.success : Colors.textMuted}
               />
               <Text style={[styles.checkLabel, { color: Colors.textMuted }, (voiceCompleted ?? false) && { color: Colors.success, fontWeight: '600' }]}>
-                Verbal: "Are you okay?" or similar
+                Verbal: “Are you okay?” or similar
               </Text>
             </View>
           </View>

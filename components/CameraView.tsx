@@ -552,9 +552,11 @@ import {
 } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { PoseCameraView } from '@/components/PoseCameraView';
+import type { CPRPostureResult } from '@/lib/pose-analysis';
 
 interface CameraViewProps {
   onHandDetected?: () => void;
+  onPostureResult?: (result: CPRPostureResult) => void;
   showOverlay?: boolean;
   overlayText?: string;
   enableHandTracking?: boolean;
@@ -563,6 +565,7 @@ interface CameraViewProps {
 
 export default function CameraViewComponent({
   onHandDetected,
+  onPostureResult,
   showOverlay = true,
   overlayText,
   enableHandTracking = false,
@@ -651,6 +654,7 @@ export default function CameraViewComponent({
         <View style={styles.frame}>
           <PoseCameraView
             onHandDetected={onHandDetected}
+            onPostureResult={onPostureResult}
             enableHandTracking={enableHandTracking}
             showOverlay={showOverlay}
             overlayText={overlayText}
@@ -707,6 +711,7 @@ export default function CameraViewComponent({
         <View style={styles.frame}>
           <PoseCameraView
             onHandDetected={onHandDetected}
+            onPostureResult={onPostureResult}
             enableHandTracking={enableHandTracking}
             showOverlay={showOverlay}
             overlayText={overlayText}
