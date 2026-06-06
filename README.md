@@ -129,18 +129,39 @@ For trying **pose + skeleton**, **Testing** or **Training** through to **step 4 
 
 ---
 
-## 5. Using pose on the web
+## 5. Using pose on the web (low-angle tablet setup)
 
-1. Start a session and advance to steps that show the camera (Testing shows preview earlier; **Hand Placement** is step **4**).
-2. Wait for **“Loading pose model…”** then a badge like **POSE · wasm** or **POSE · webgl** (first load can take 15–30 seconds).
-3. Frame your **upper body and arms** in the camera.
-4. Overlays you should see:
-   - **Skeleton** (lines/dots on body)
-   - **STERNAL TARGET** (red box on chest area)
-   - Feedback: arms straight, position, tips
-5. On **Hand Placement**, hold **good** posture (straight arms + lean forward) for about **1.5 seconds** to auto-verify and advance—or use **Verify Hands** in simulation if pose is not available.
+### Camera placement
 
-Overlay text **“Pose preview — hold good posture at Hand Placement to advance”** means you are on an early step with camera preview; full auto-advance from pose applies on **Hand Placement**.
+Place the **phone or tablet on the ground at ~45°**, **front camera** facing the person performing CPR (screen toward the performer). The performer should fill the tall **ALIGN IN FRAME** box: ears at the top, shoulders mid-frame, interlocked hands at the bottom.
+
+You **cannot continue** to the next step until the app detects you inside the frame for about **1 second** (all camera steps).
+
+### What you should see
+
+1. Wait for **“Loading pose model…”** then **POSE · wasm** or **POSE · webgl** (first load ~15–30 s).
+2. **Framing box** — red **ALIGN IN FRAME** → green **READY TO START** when head, shoulders, and hands are inside.
+3. **CPR triangle overlay** — shoulders, straight arms, wrists only (no full-body skeleton).
+4. **Live cue chips** — ears visible, looking down, elbows straight, triangle formed.
+5. **Voice cues** (web) — e.g. *“Keep the elbow straight”*, same style as compression rate/depth alerts.
+
+### Hand placement (step 4)
+
+Hold **full good posture** for **1.5 seconds** to auto-verify:
+
+- In frame (ears, shoulders, wrists visible in box)
+- Both ears visible
+- Looking down at chest (estimated from head angle — not true eye tracking)
+- Straight elbows
+- Shoulder–hand triangle
+
+Or use **Verify Hands** in simulation mode if pose is unavailable.
+
+### Limitations (share with trainees)
+
+- **Looking down** is inferred from 2D head pose, not eye gaze; accuracy depends on keeping the tablet near 45°.
+- **Ear visibility** can fail with hoods, long hair, or backlight.
+- **Elbow straightness** is judged in 2D; extreme side angles reduce accuracy.
 
 ---
 
@@ -184,6 +205,7 @@ The web client talks to `http://localhost:5000` (WebSocket `/ws/arduino`) when u
 | `app/` | Expo Router screens (main training UI) |
 | `components/` | UI including `PoseCameraView`, camera, AED, feedback |
 | `lib/pose-analysis.ts` | CPR posture rules (shared web + Android) |
+| `lib/cpr-pose-constants.ts` | Low-angle framing zone, thresholds, triangle overlay |
 | `lib/pose-detection-web.ts` | Web MoveNet (TensorFlow.js) |
 | `assets/models/movenet_lightning.tflite` | Android pose model (not used on web) |
 | `server/` | Express API + Arduino WebSocket |

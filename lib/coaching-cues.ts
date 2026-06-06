@@ -33,9 +33,55 @@ export function pickSensorCue(currentRate: number, currentDepth: number): string
 }
 
 export function pickPoseCue(result: CPRPostureResult): string | null {
-  if (!result.armsVisible) return null;
-  if (!result.armsAreStraight) return 'Straighten your arms';
-  if (!result.shouldersOverWrists) return 'Lean forward';
+  if (result.quality === 'none' && !result.framingOk) {
+    return 'Move into the frame';
+  }
+  if (!result.framingOk) return 'Move into the frame';
+  if (!result.earsVisible) return 'Show both ears in frame';
+  if (!result.lookingDown) return 'Look down at the chest';
+  if (result.elbowBent || !result.armsAreStraight) return 'Keep the elbow straight';
+  if (!result.triangleFormed) return 'Stack shoulders over hands';
   return null;
 }
 
+export type PoseCueChip = {
+  id: string;
+  label: string;
+  ok: boolean;
+  icon: string;
+};
+
+export function getPoseCueChips(result: CPRPostureResult): PoseCueChip[] {
+  return [
+    {
+      id: 'frame',
+      label: result.framingOk ? 'In frame' : 'Move into frame',
+      ok: result.framingOk,
+      icon: 'crop-free',
+    },
+    {
+      id: 'ears',
+      label: result.earsVisible ? 'Ears visible' : 'Show both ears',
+      ok: result.earsVisible,
+      icon: 'ear-hearing',
+    },
+    {
+      id: 'look',
+      label: result.lookingDown ? 'Looking down' : 'Look at chest',
+      ok: result.lookingDown,
+      icon: 'eye-outline',
+    },
+    {
+      id: 'elbow',
+      label: result.armsAreStraight ? 'Elbows straight' : 'Keep the elbow straight',
+      ok: result.armsAreStraight && !result.elbowBent,
+      icon: 'arm-flex',
+    },
+    {
+      id: 'triangle',
+      label: result.triangleFormed ? 'Triangle formed' : 'Stack over hands',
+      ok: result.triangleFormed,
+      icon: 'triangle-outline',
+    },
+  ];
+}

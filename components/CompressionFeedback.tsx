@@ -7,6 +7,7 @@ import { useTheme } from '@/contexts/ThemeContext';
 import { COMPRESSION_TARGET_RATE, COMPRESSION_TARGET_DEPTH, COMPRESSIONS_PER_SET, COMPRESSION_SETS_REQUIRED } from '@/constants/cpr-protocol';
 import type { CPRPostureResult } from '@/lib/pose-analysis';
 import { pickPoseCue, pickSensorCue, speakCoachingCue } from '@/lib/coaching-cues';
+import { PoseCueChips } from '@/components/PoseCueChips';
 
 interface CompressionSet {
   count: number;
@@ -263,35 +264,7 @@ function CorrectionSidebar({
             </View>
           </View>
         ) : (
-          <View style={sidebarStyles.cueRow}>
-            <View style={[sidebarStyles.cueChip, {
-              backgroundColor: postureResult.armsAreStraight ? 'rgba(0,230,118,0.12)' : 'rgba(229,57,53,0.12)',
-              borderColor: postureResult.armsAreStraight ? Colors.feedbackGood : Colors.feedbackBad,
-            }]}>
-              <MaterialCommunityIcons
-                name={postureResult.armsAreStraight ? 'arm-flex' : 'arm-flex-outline'}
-                size={13}
-                color={postureResult.armsAreStraight ? Colors.feedbackGood : Colors.feedbackBad}
-              />
-              <Text style={[sidebarStyles.cueText, { color: postureResult.armsAreStraight ? Colors.feedbackGood : Colors.feedbackBad }]}>
-                {postureResult.armsAreStraight ? 'Arms straight' : 'Straighten arms'}
-              </Text>
-            </View>
-
-            <View style={[sidebarStyles.cueChip, {
-              backgroundColor: postureResult.shouldersOverWrists ? 'rgba(0,230,118,0.12)' : 'rgba(229,57,53,0.12)',
-              borderColor: postureResult.shouldersOverWrists ? Colors.feedbackGood : Colors.feedbackBad,
-            }]}>
-              <MaterialCommunityIcons
-                name="human-handsdown"
-                size={13}
-                color={postureResult.shouldersOverWrists ? Colors.feedbackGood : Colors.feedbackBad}
-              />
-              <Text style={[sidebarStyles.cueText, { color: postureResult.shouldersOverWrists ? Colors.feedbackGood : Colors.feedbackBad }]}>
-                {postureResult.shouldersOverWrists ? 'Shoulders stacked' : 'Lean forward'}
-              </Text>
-            </View>
-          </View>
+          <PoseCueChips result={postureResult} Colors={Colors} compact />
         )
       ) : null}
 

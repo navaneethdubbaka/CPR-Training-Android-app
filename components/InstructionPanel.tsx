@@ -24,6 +24,8 @@ interface InstructionPanelProps {
   cycleBreathCount?: number;
   completedCycles?: number;
   totalCycles?: number;
+  framingBlocked?: boolean;
+  framingMessage?: string;
 }
 
 const STEP_ICONS: Record<string, keyof typeof MaterialCommunityIcons.glyphMap> = {
@@ -55,6 +57,8 @@ export function InstructionPanel({
   cycleBreathCount = 0,
   completedCycles = 0,
   totalCycles = 5,
+  framingBlocked = false,
+  framingMessage = 'Adjust camera until your head, shoulders, and hands are inside the box',
 }: InstructionPanelProps) {
   const { theme } = useTheme();
   const Colors = getColors(theme);
@@ -272,21 +276,37 @@ export function InstructionPanel({
         </View>
       )}
 
+      {framingBlocked && (
+        <View style={[styles.framingBanner, { backgroundColor: 'rgba(229,57,53,0.12)', borderColor: Colors.accent }]}>
+          <MaterialCommunityIcons name="crop-free" size={18} color={Colors.accent} />
+          <Text style={[styles.framingBannerText, { color: Colors.text }]}>{framingMessage}</Text>
+        </View>
+      )}
+
       {showAdvanceButton() && (
         <Pressable
           style={({ pressed }) => [
             styles.advanceBtn,
             { backgroundColor: Colors.surfaceHighlight },
             canAdvance && { backgroundColor: Colors.accent },
-            pressed && styles.advanceBtnPressed,
+            framingBlocked && styles.advanceBtnDisabled,
+            pressed && canAdvance && !framingBlocked && styles.advanceBtnPressed,
           ]}
+          disabled={framingBlocked}
           onPress={() => {
+            if (framingBlocked) return;
             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
             onAdvance();
           }}
         >
           <Text style={[styles.advanceBtnText, { color: Colors.text }]}>
-            {canAdvance ? 'Continue' : step.autoAdvance ? 'Skip' : 'Confirm & Continue'}
+            {framingBlocked
+              ? 'Align in frame to continue'
+              : canAdvance
+                ? 'Continue'
+                : step.autoAdvance
+                  ? 'Skip'
+                  : 'Confirm & Continue'}
           </Text>
           <MaterialCommunityIcons name="arrow-right" size={20} color={Colors.text} />
         </Pressable>
@@ -478,5 +498,23 @@ const styles = StyleSheet.create({
     height: 18,
     borderRadius: 9,
     borderWidth: 2,
+  },
+  framingBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    borderRadius: 10,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  framingBannerText: {
+    flex: 1,
+    fontSize: 12,
+    fontWeight: '600',
+    lineHeight: 17,
+  },
+  advanceBtnDisabled: {
+    opacity: 0.55,
   },
 });

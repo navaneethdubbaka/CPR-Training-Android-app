@@ -1,3 +1,21 @@
+import {
+  ELBOW_STRAIGHT_MIN_DEG,
+  ELBOW_STRAIGHT_MIN_DEG_LEGACY,
+  isInsideZone,
+  isLowAnglePostureGood,
+  LOOK_DOWN_NOSE_ABOVE_WRIST_Y,
+  LOOK_DOWN_NOSE_BELOW_EAR_Y,
+  LOOK_DOWN_NOSE_WRIST_X_MAX,
+  LOW_ANGLE_FRAMING_ZONE,
+  POSE_CONF_DEFAULT,
+  POSE_CONF_EAR,
+  POSE_CONF_NOSE,
+  type PoseAnalysisProfile,
+  TRIANGLE_ELBOW_LINE_MAX_DIST,
+  TRIANGLE_WRIST_BELOW_SHOULDER_Y,
+  TRIANGLE_WRIST_NARROWER_RATIO,
+} from './cpr-pose-constants';
+
 export interface PoseKeypoint {
   y: number;
   x: number;
@@ -54,8 +72,28 @@ export interface CPRPostureResult {
   armsVisible: boolean;
   armsAreStraight: boolean;
   shouldersOverWrists: boolean;
+  earsVisible: boolean;
+  lookingDown: boolean;
+  triangleFormed: boolean;
+  framingOk: boolean;
+  elbowBent: boolean;
   tips: string[];
 }
+
+export const EMPTY_POSTURE_RESULT: CPRPostureResult = {
+  quality: 'none',
+  leftArmAngle: 0,
+  rightArmAngle: 0,
+  armsVisible: false,
+  armsAreStraight: false,
+  shouldersOverWrists: false,
+  earsVisible: false,
+  lookingDown: false,
+  triangleFormed: false,
+  framingOk: false,
+  elbowBent: false,
+  tips: ['No pose detected'],
+};
 
 function calcAngle(a: PoseKeypoint, b: PoseKeypoint, c: PoseKeypoint): number {
   const v1x = a.x - b.x;
@@ -67,6 +105,247 @@ function calcAngle(a: PoseKeypoint, b: PoseKeypoint, c: PoseKeypoint): number {
   if (mag < 0.0001) return 0;
   const cos = Math.max(-1, Math.min(1, dot / mag));
   return (Math.acos(cos) * 180) / Math.PI;
+}
+
+function pointToSegmentDist(
+  px: number, py: number,
+  ax: number, ay: number,
+  bx: number, by: number,
+): number {
+  const dx = bx - ax;
+  const dy = by - ay;
+  const lenSq = dx * dx + dy * dy;
+  if (lenSq < 0.0001) {
+    return Math.hypot(px - ax, py - ay);
+  }
+  const t = Math.max(0, Math.min(1, ((px - ax) * dx + (py - ay) * dy) / lenSq));
+  const projX = ax + t * dx;
+  const projY = ay + t * dy;
+  return Math.hypot(px - projX, py - projY);
+}
+
+function checkFraming(keypoints: PoseKeypoint[]): boolean {
+  const le = keypoints[KP.LEFT_EAR];
+  const re = keypoints[KP.RIGHT_EAR];
+  const ls = keypoints[KP.LEFT_SHOULDER];
+  const rs = keypoints[KP.RIGHT_SHOULDER];
+  const lw = keypoints[KP.LEFT_WRIST];
+  const rw = keypoints[KP.RIGHT_WRIST];
+
+  const earsOk =
+    le.score > POSE_CONF_EAR && re.score > POSE_CONF_EAR &&
+    isInsideZone(le.x, le.y, LOW_ANGLE_FRAMING_ZONE) &&
+    isInsideZone(re.x, re.y, LOW_ANGLE_FRAMING_ZONE);
+
+  const shouldersOk =
+    ls.score > POSE_CONF_DEFAULT && rs.score > POSE_CONF_DEFAULT &&
+    isInsideZone(ls.x, ls.y, LOW_ANGLE_FRAMING_ZONE) &&
+    isInsideZone(rs.x, rs.y, LOW_ANGLE_FRAMING_ZONE);
+
+  const wristsOk =
+    lw.score > POSE_CONF_DEFAULT && rw.score > POSE_CONF_DEFAULT &&
+    isInsideZone(lw.x, lw.y, LOW_ANGLE_FRAMING_ZONE) &&
+    isInsideZone(rw.x, rw.y, LOW_ANGLE_FRAMING_ZONE);
+
+  return earsOk && shouldersOk && wristsOk;
+}
+
+function checkLookingDown(
+  nose: PoseKeypoint,
+  leftEar: PoseKeypoint,
+  rightEar: PoseKeypoint,
+  lw: PoseKeypoint,
+  rw: PoseKeypoint,
+): boolean {
+  if (nose.score < POSE_CONF_NOSE) return false;
+  if (leftEar.score < POSE_CONF_EAR || rightEar.score < POSE_CONF_EAR) return false;
+  if (lw.score < POSE_CONF_DEFAULT || rw.score < POSE_CONF_DEFAULT) return false;
+
+  const midEarY = (leftEar.y + rightEar.y) / 2;
+  const midEarX = (leftEar.x + rightEar.x) / 2;
+  const midWristX = (lw.x + rw.x) / 2;
+  const midWristY = (lw.y + rw.y) / 2;
+
+  const noseBelowEars = nose.y > midEarY + LOOK_DOWN_NOSE_BELOW_EAR_Y;
+  const noseNearHands = Math.abs(nose.x - midWristX) < LOOK_DOWN_NOSE_WRIST_X_MAX;
+  const noseAboveWrists = nose.y < midWristY - LOOK_DOWN_NOSE_ABOVE_WRIST_Y;
+
+  return noseBelowEars && noseNearHands && noseAboveWrists;
+}
+
+function checkTriangle(
+  ls: PoseKeypoint,
+  rs: PoseKeypoint,
+  le: PoseKeypoint,
+  re: PoseKeypoint,
+  lw: PoseKeypoint,
+  rw: PoseKeypoint,
+): boolean {
+  const midShoulderY = (ls.y + rs.y) / 2;
+  const midWristY = (lw.y + rw.y) / 2;
+  const wristsBelow = midWristY > midShoulderY + TRIANGLE_WRIST_BELOW_SHOULDER_Y;
+
+  const shoulderSpan = Math.abs(ls.x - rs.x);
+  const wristSpan = Math.abs(lw.x - rw.x);
+  const wristsNarrower = wristSpan < shoulderSpan * TRIANGLE_WRIST_NARROWER_RATIO;
+
+  const leftElbowOnLine = pointToSegmentDist(le.x, le.y, ls.x, ls.y, lw.x, lw.y) < TRIANGLE_ELBOW_LINE_MAX_DIST;
+  const rightElbowOnLine = pointToSegmentDist(re.x, re.y, rs.x, rs.y, rw.x, rw.y) < TRIANGLE_ELBOW_LINE_MAX_DIST;
+
+  return wristsBelow && wristsNarrower && leftElbowOnLine && rightElbowOnLine;
+}
+
+function buildLowAngleTips(result: {
+  framingOk: boolean;
+  earsVisible: boolean;
+  lookingDown: boolean;
+  armsAreStraight: boolean;
+  triangleFormed: boolean;
+  armsVisible: boolean;
+}): string[] {
+  const tips: string[] = [];
+  if (!result.framingOk) tips.push('Move into the frame');
+  if (!result.earsVisible) tips.push('Show both ears in frame');
+  if (!result.lookingDown) tips.push('Look down at the chest');
+  if (result.armsVisible && !result.armsAreStraight) tips.push('Keep the elbow straight');
+  if (!result.triangleFormed) tips.push('Stack shoulders over hands');
+  if (!result.armsVisible) tips.push('Raise hands into camera view');
+  return tips;
+}
+
+function analyzeLegacy(keypoints: PoseKeypoint[]): CPRPostureResult {
+  const ls = keypoints[KP.LEFT_SHOULDER];
+  const rs = keypoints[KP.RIGHT_SHOULDER];
+  const le = keypoints[KP.LEFT_ELBOW];
+  const re = keypoints[KP.RIGHT_ELBOW];
+  const lw = keypoints[KP.LEFT_WRIST];
+  const rw = keypoints[KP.RIGHT_WRIST];
+
+  const armsVisible =
+    ls.score > POSE_CONF_DEFAULT && rs.score > POSE_CONF_DEFAULT &&
+    le.score > POSE_CONF_DEFAULT && re.score > POSE_CONF_DEFAULT &&
+    lw.score > POSE_CONF_DEFAULT && rw.score > POSE_CONF_DEFAULT;
+
+  if (!armsVisible) {
+    return { ...EMPTY_POSTURE_RESULT, tips: ['Raise hands into camera view'] };
+  }
+
+  const leftAngle = calcAngle(ls, le, lw);
+  const rightAngle = calcAngle(rs, re, rw);
+  const leftStraight = leftAngle > ELBOW_STRAIGHT_MIN_DEG_LEGACY;
+  const rightStraight = rightAngle > ELBOW_STRAIGHT_MIN_DEG_LEGACY;
+  const armsAreStraight = leftStraight && rightStraight;
+
+  const midWristX = (lw.x + rw.x) / 2;
+  const midShoulderX = (ls.x + rs.x) / 2;
+  const shouldersOverWrists = Math.abs(midShoulderX - midWristX) < 0.15;
+
+  const tips: string[] = [];
+  if (!armsAreStraight) tips.push('Keep the elbow straight');
+  if (!shouldersOverWrists) tips.push('Lean forward — shoulders over wrists');
+
+  let quality: 'good' | 'fair' | 'poor';
+  if (armsAreStraight && shouldersOverWrists) {
+    quality = 'good';
+  } else if (leftStraight || rightStraight) {
+    quality = 'fair';
+  } else {
+    quality = 'poor';
+  }
+
+  return {
+    quality,
+    leftArmAngle: leftAngle,
+    rightArmAngle: rightAngle,
+    armsVisible,
+    armsAreStraight,
+    shouldersOverWrists,
+    earsVisible: true,
+    lookingDown: true,
+    triangleFormed: shouldersOverWrists,
+    framingOk: true,
+    elbowBent: !armsAreStraight,
+    tips,
+  };
+}
+
+function analyzeLowAngle45(keypoints: PoseKeypoint[]): CPRPostureResult {
+  const nose = keypoints[KP.NOSE];
+  const leEar = keypoints[KP.LEFT_EAR];
+  const reEar = keypoints[KP.RIGHT_EAR];
+  const ls = keypoints[KP.LEFT_SHOULDER];
+  const rs = keypoints[KP.RIGHT_SHOULDER];
+  const le = keypoints[KP.LEFT_ELBOW];
+  const re = keypoints[KP.RIGHT_ELBOW];
+  const lw = keypoints[KP.LEFT_WRIST];
+  const rw = keypoints[KP.RIGHT_WRIST];
+
+  const framingOk = checkFraming(keypoints);
+
+  const earsVisible =
+    leEar.score > POSE_CONF_EAR && reEar.score > POSE_CONF_EAR;
+
+  const armsVisible =
+    ls.score > POSE_CONF_DEFAULT && rs.score > POSE_CONF_DEFAULT &&
+    le.score > POSE_CONF_DEFAULT && re.score > POSE_CONF_DEFAULT &&
+    lw.score > POSE_CONF_DEFAULT && rw.score > POSE_CONF_DEFAULT;
+
+  if (!armsVisible && !earsVisible) {
+    return {
+      ...EMPTY_POSTURE_RESULT,
+      framingOk,
+      tips: framingOk ? ['Raise hands into camera view'] : ['Move into the frame'],
+    };
+  }
+
+  const leftAngle = armsVisible ? calcAngle(ls, le, lw) : 0;
+  const rightAngle = armsVisible ? calcAngle(rs, re, rw) : 0;
+  const leftStraight = leftAngle >= ELBOW_STRAIGHT_MIN_DEG;
+  const rightStraight = rightAngle >= ELBOW_STRAIGHT_MIN_DEG;
+  const armsAreStraight = armsVisible && leftStraight && rightStraight;
+  const elbowBent = armsVisible && !armsAreStraight;
+
+  const midWristX = (lw.x + rw.x) / 2;
+  const midShoulderX = (ls.x + rs.x) / 2;
+  const shouldersOverWrists = armsVisible && Math.abs(midShoulderX - midWristX) < 0.15;
+
+  const lookingDown = checkLookingDown(nose, leEar, reEar, lw, rw);
+  const triangleFormed = armsVisible && checkTriangle(ls, rs, le, re, lw, rw);
+
+  const partial = {
+    framingOk,
+    earsVisible,
+    lookingDown,
+    armsAreStraight,
+    triangleFormed,
+    armsVisible,
+  };
+  const tips = buildLowAngleTips(partial);
+
+  let quality: 'good' | 'fair' | 'poor' | 'none';
+  if (isLowAnglePostureGood(partial)) {
+    quality = 'good';
+  } else if (framingOk && (earsVisible || armsVisible)) {
+    const passCount = [earsVisible, lookingDown, armsAreStraight, triangleFormed].filter(Boolean).length;
+    quality = passCount >= 2 ? 'fair' : 'poor';
+  } else {
+    quality = 'none';
+  }
+
+  return {
+    quality,
+    leftArmAngle: leftAngle,
+    rightArmAngle: rightAngle,
+    armsVisible,
+    armsAreStraight,
+    shouldersOverWrists,
+    earsVisible,
+    lookingDown,
+    triangleFormed,
+    framingOk,
+    elbowBent,
+    tips,
+  };
 }
 
 /** Normalize MoveNet output to 0–1 for overlay (handles pixel coords and slight >1 values). */
@@ -99,61 +378,16 @@ export function parseKeypointsFromFlat(flat: number[]): PoseKeypoint[] {
   });
 }
 
-export function analyzeCPRPosture(keypoints: PoseKeypoint[]): CPRPostureResult {
+export function analyzeCPRPosture(
+  keypoints: PoseKeypoint[],
+  profile: PoseAnalysisProfile = 'legacy',
+): CPRPostureResult {
   if (keypoints.length < 17) {
-    return {
-      quality: 'none', leftArmAngle: 0, rightArmAngle: 0,
-      armsVisible: false, armsAreStraight: false, shouldersOverWrists: false,
-      tips: ['No pose detected'],
-    };
+    return { ...EMPTY_POSTURE_RESULT };
   }
 
-  const CONF = 0.25;
-  const ls = keypoints[KP.LEFT_SHOULDER];
-  const rs = keypoints[KP.RIGHT_SHOULDER];
-  const le = keypoints[KP.LEFT_ELBOW];
-  const re = keypoints[KP.RIGHT_ELBOW];
-  const lw = keypoints[KP.LEFT_WRIST];
-  const rw = keypoints[KP.RIGHT_WRIST];
-
-  const armsVisible =
-    ls.score > CONF && rs.score > CONF &&
-    le.score > CONF && re.score > CONF &&
-    lw.score > CONF && rw.score > CONF;
-
-  if (!armsVisible) {
-    return {
-      quality: 'none', leftArmAngle: 0, rightArmAngle: 0,
-      armsVisible: false, armsAreStraight: false, shouldersOverWrists: false,
-      tips: ['Raise hands into camera view'],
-    };
+  if (profile === 'low_angle_45') {
+    return analyzeLowAngle45(keypoints);
   }
-
-  const leftAngle = calcAngle(ls, le, lw);
-  const rightAngle = calcAngle(rs, re, rw);
-  const leftStraight = leftAngle > 160;
-  const rightStraight = rightAngle > 160;
-  const armsAreStraight = leftStraight && rightStraight;
-
-  const midWristX = (lw.x + rw.x) / 2;
-  const midShoulderX = (ls.x + rs.x) / 2;
-  const shouldersOverWrists = Math.abs(midShoulderX - midWristX) < 0.15;
-
-  const tips: string[] = [];
-  if (!armsAreStraight) tips.push('Straighten arms');
-  if (!shouldersOverWrists) tips.push('Lean forward — shoulders over wrists');
-
-  let quality: 'good' | 'fair' | 'poor';
-  if (armsAreStraight && shouldersOverWrists) {
-    quality = 'good';
-  } else if (leftStraight || rightStraight) {
-    quality = 'fair';
-  } else {
-    quality = 'poor';
-  }
-
-  return {
-    quality, leftArmAngle: leftAngle, rightArmAngle: rightAngle,
-    armsVisible, armsAreStraight, shouldersOverWrists, tips,
-  };
+  return analyzeLegacy(keypoints);
 }

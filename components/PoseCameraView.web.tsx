@@ -11,12 +11,13 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { getColors } from '@/constants/colors';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useWebPoseDetector } from '@/lib/pose-detection-web';
-import type { CPRPostureResult, PoseKeypoint } from '@/lib/pose-analysis';
+import { EMPTY_POSTURE_RESULT, type CPRPostureResult, type PoseKeypoint } from '@/lib/pose-analysis';
+import { HAND_PLACEMENT_HOLD_MS, isLowAnglePostureGood } from '@/lib/cpr-pose-constants';
 import { PoseSkeletonOverlay } from '@/components/PoseSkeletonOverlay';
+import { PoseCueChips } from '@/components/PoseCueChips';
+import { usePoseVoiceCues } from '@/lib/use-pose-voice-cues';
 
 export const CAMERA_DEVICE_KEY = 'cpr_camera_device_id';
-
-const GOOD_QUALITY_HOLD_MS = 1500;
 
 interface Props {
   onHandDetected?: () => void;
@@ -48,10 +49,7 @@ export function PoseCameraView({
   const [webError, setWebError] = useState<string | null>(null);
   const [webLoading, setWebLoading] = useState(true);
   const [keypoints, setKeypoints] = useState<PoseKeypoint[]>([]);
-  const [postureResult, setPostureResult] = useState<CPRPostureResult>({
-    quality: 'none', leftArmAngle: 0, rightArmAngle: 0,
-    armsVisible: false, armsAreStraight: false, shouldersOverWrists: false, tips: [],
-  });
+  const [postureResult, setPostureResult] = useState<CPRPostureResult>(EMPTY_POSTURE_RESULT);
   const [viewSize, setViewSize] = useState({ width: 0, height: 0 });
   const [videoSize, setVideoSize] = useState({ width: 0, height: 0 });
 
@@ -127,10 +125,10 @@ export function PoseCameraView({
 
     if (isPaused || !enableHandTracking) return;
 
-    if (result.quality === 'good') {
+    if (isLowAnglePostureGood(result)) {
       if (goodSinceRef.current === null) {
         goodSinceRef.current = Date.now();
-      } else if (!handDetectedFiredRef.current && Date.now() - goodSinceRef.current >= GOOD_QUALITY_HOLD_MS) {
+      } else if (!handDetectedFiredRef.current && Date.now() - goodSinceRef.current >= HAND_PLACEMENT_HOLD_MS) {
         handDetectedFiredRef.current = true;
         onHandDetected?.();
       }
@@ -150,6 +148,7 @@ export function PoseCameraView({
   }, []);
 
   const modelReady = modelState === 'loaded';
+  usePoseVoiceCues(postureResult, enableHandTracking && modelReady && !isPaused);
   const qualityColor =
     postureResult.quality === 'good' ? '#00E676' :
     postureResult.quality === 'fair' ? '#FFD600' :
@@ -196,6 +195,7 @@ export function PoseCameraView({
             videoHeight={videoSize.height}
             Colors={Colors}
             mirrorX
+            displayMode="cpr_triangle"
           />
         </View>
       )}
@@ -229,21 +229,12 @@ export function PoseCameraView({
             </View>
           ) : (
             <>
-              <View style={styles.feedbackRow}>
-                <Text style={[styles.feedbackText, { color: postureResult.armsAreStraight ? '#00E676' : '#E53935' }]}>
-                  Arms {postureResult.armsAreStraight ? 'STRAIGHT ✓' : 'bent — straighten ✗'}
-                </Text>
-              </View>
-              <View style={styles.feedbackRow}>
-                <Text style={[styles.feedbackText, { color: postureResult.shouldersOverWrists ? '#00E676' : '#E53935' }]}>
-                  Position {postureResult.shouldersOverWrists ? 'GOOD ✓' : '— lean forward ✗'}
-                </Text>
-              </View>
+              <PoseCueChips result={postureResult} Colors={Colors} compact />
               {postureResult.tips.length > 0 && (
                 <View style={styles.feedbackRow}>
                   <MaterialCommunityIcons name="lightbulb-on-outline" size={14} color="#FFD600" />
                   <Text style={[styles.tipsText, { color: '#FFD600' }]}>
-                    {postureResult.tips.join(' · ')}
+                    {postureResult.tips[0]}
                   </Text>
                 </View>
               )}
@@ -312,12 +303,13 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: 8,
     left: 8,
-    gap: 4,
+    gap: 6,
     backgroundColor: 'rgba(0,0,0,0.7)',
     borderRadius: 10,
     paddingHorizontal: 12,
     paddingVertical: 8,
-    maxWidth: '90%',
+    maxWidth: '95%',
+    zIndex: 30,
   },
   modelStatusBlock: {
     gap: 6,

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { View, Text, StyleSheet, ScrollView, Platform, useWindowDimensions } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
@@ -21,6 +21,7 @@ import { SettingsModal } from '@/components/SettingsModal';
 import { EnduranceScreen } from '@/components/EnduranceScreen';
 import { StepVideo } from '@/components/StepVideo';
 import type { CPRPostureResult } from '@/lib/pose-analysis';
+import { FRAMING_HOLD_MS } from '@/lib/cpr-pose-constants';
 
 const ENABLE_POSE_VOICE_CUES = Platform.OS === 'web';
 
@@ -28,6 +29,8 @@ export default function TrainingScreen() {
   const [showSettings, setShowSettings] = useState(false);
   const [voiceCompleted, setVoiceCompleted] = useState(false);
   const [postureResult, setPostureResult] = useState<CPRPostureResult | null>(null);
+  const [framingGateOpen, setFramingGateOpen] = useState(false);
+  const framingSinceRef = useRef<number | null>(null);
   const insets = useSafeAreaInsets();
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
   const topInset = Platform.OS === 'web' ? 67 : insets.top;
@@ -61,6 +64,45 @@ export default function TrainingScreen() {
   useEffect(() => {
     setVoiceCompleted(false);
   }, [currentStepIndex]);
+
+  const showPoseTracking = true;
+
+  useEffect(() => {
+    framingSinceRef.current = null;
+    setFramingGateOpen(false);
+  }, [currentStepIndex]);
+
+  useEffect(() => {
+    const poseFramingRequired = showPoseTracking && Platform.OS === 'web';
+    if (!poseFramingRequired) {
+      setFramingGateOpen(true);
+      framingSinceRef.current = null;
+      return;
+    }
+
+    if (!postureResult?.framingOk) {
+      framingSinceRef.current = null;
+      setFramingGateOpen(false);
+      return;
+    }
+
+    if (framingGateOpen) return;
+
+    if (framingSinceRef.current === null) {
+      framingSinceRef.current = Date.now();
+    }
+
+    const elapsed = Date.now() - framingSinceRef.current;
+    if (elapsed >= FRAMING_HOLD_MS) {
+      setFramingGateOpen(true);
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      if (postureResult?.framingOk) setFramingGateOpen(true);
+    }, FRAMING_HOLD_MS - elapsed);
+    return () => clearTimeout(timer);
+  }, [postureResult?.framingOk, showPoseTracking, framingGateOpen]);
 
 
     //Satya Code
@@ -99,12 +141,16 @@ useEffect(() => {
     }
   }, [currentStep, sensorData, stepTimer, handPlacementVerified, completedCycles, totalCycles, aedShockDelivered, postAedCompressionCount, shoulderTapDone, voiceCompleted]);
 
+  const stepCanAdvance = framingGateOpen && (
+    currentStep?.autoAdvance ? canAutoAdvance : true
+  );
+
   useEffect(() => {
-    if (canAutoAdvance && currentStep?.autoAdvance && isTraining && !isPaused) {
+    if (stepCanAdvance && currentStep?.autoAdvance && isTraining && !isPaused) {
       const timer = setTimeout(() => advanceStep(), 500);
       return () => clearTimeout(timer);
     }
-  }, [canAutoAdvance, currentStep, isTraining, isPaused, advanceStep]);
+  }, [stepCanAdvance, currentStep, isTraining, isPaused, advanceStep]);
 
   const getAutoAdvanceText = useCallback(() => {
     if (!currentStep) return undefined;
@@ -136,7 +182,7 @@ useEffect(() => {
   const showCameraStep = currentStep?.requiresCamera || currentStep?.id === 'compressions';
   const showAED = currentStep?.id === 'aed_pads' || currentStep?.id === 'aed_analyze' || currentStep?.id === 'aed_shock';
   const showVisualCamera = true;
-  const showPoseTracking = true;
+  const framingBlocked = Platform.OS === 'web' && showPoseTracking && !framingGateOpen;
   const showCompressions = currentStep?.id === 'compressions' && cyclePhase === 'compress';
   const showPostAedCompressions = currentStep?.id === 'post_aed_compressions';
   const showBreaths = currentStep?.id === 'compressions' && cyclePhase === 'breathe';
@@ -283,7 +329,9 @@ useEffect(() => {
         stepIndex={currentStepIndex}
         stepTimer={stepTimer}
         onAdvance={advanceStep}
-        canAdvance={canAutoAdvance}
+        canAdvance={stepCanAdvance}
+        framingBlocked={framingBlocked}
+        framingMessage="Adjust camera until your head, shoulders, and hands are inside the box"
         autoAdvanceText={getAutoAdvanceText()}
         hardwareOnly={hardwareOnly}
         hideHints={isTesting}

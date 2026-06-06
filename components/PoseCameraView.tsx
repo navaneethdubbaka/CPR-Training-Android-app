@@ -6,6 +6,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { getColors } from '@/constants/colors';
 import { useTheme } from '@/contexts/ThemeContext';
 import { usePoseDetector, type PoseKeypoint, type CPRPostureResult } from '@/lib/pose-detection';
+import { EMPTY_POSTURE_RESULT } from '@/lib/pose-analysis';
 import { PoseSkeletonOverlay } from '@/components/PoseSkeletonOverlay';
 
 export const CAMERA_DEVICE_KEY = 'cpr_camera_device_id';
@@ -36,10 +37,7 @@ export function PoseCameraView({
 
   const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(null);
   const [keypoints, setKeypoints] = useState<PoseKeypoint[]>([]);
-  const [postureResult, setPostureResult] = useState<CPRPostureResult>({
-    quality: 'none', leftArmAngle: 0, rightArmAngle: 0,
-    armsVisible: false, armsAreStraight: false, shouldersOverWrists: false, tips: [],
-  });
+  const [postureResult, setPostureResult] = useState<CPRPostureResult>(EMPTY_POSTURE_RESULT);
   const [viewSize, setViewSize] = useState({ width: 0, height: 0 });
   const [cameraFacing, setCameraFacing] = useState<'front' | 'back'>('back');
   const [inferenceCount, setInferenceCount] = useState(0);

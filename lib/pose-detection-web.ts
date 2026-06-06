@@ -178,7 +178,7 @@ export function useWebPoseDetector(
                 const w = video.videoWidth || video.clientWidth || 1;
                 const h = video.videoHeight || video.clientHeight || 1;
                 const kps = toNormalizedKeypoints(pose.keypoints, w, h, mirrorX);
-                onPostureResult(kps, analyzeCPRPosture(kps));
+                onPostureResult(kps, analyzeCPRPosture(kps, 'low_angle_45'));
               }
             })
             .catch(() => {})

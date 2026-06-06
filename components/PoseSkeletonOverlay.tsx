@@ -4,17 +4,26 @@ import Svg, { Path, Rect, Text as SvgText } from 'react-native-svg';
 import { getColors } from '@/constants/colors';
 import {
   SKELETON_CONNECTIONS,
-  CPR_KEYPOINT_INDICES,
   type PoseKeypoint,
   type CPRPostureResult,
 } from '@/lib/pose-analysis';
+import {
+  CPR_GUIDE_CONNECTIONS,
+  CPR_TRIANGLE_CONNECTIONS,
+  CPR_TRIANGLE_KEYPOINT_INDICES,
+  LOW_ANGLE_FRAMING_ZONE,
+} from '@/lib/cpr-pose-constants';
 import { videoNormToViewPx } from '@/lib/video-view-mapping';
 
-export const STERNAL_ZONE = { x: 0.35, y: 0.3, w: 0.3, h: 0.35 } as const;
+/** @deprecated Use LOW_ANGLE_FRAMING_ZONE — kept for backward compatibility. */
+export const STERNAL_ZONE = LOW_ANGLE_FRAMING_ZONE;
 
 const DRAW_SCORE_MIN = 0.1;
 const CPR_STROKE = Platform.OS === 'android' ? 5 : 3;
 const JOINT_SIZE = Platform.OS === 'android' ? 14 : 10;
+const EAR_SIZE = Platform.OS === 'android' ? 12 : 9;
+
+export type PoseOverlayDisplayMode = 'full' | 'cpr_triangle';
 
 interface Props {
   keypoints: PoseKeypoint[];
@@ -23,21 +32,15 @@ interface Props {
   height: number;
   Colors: ReturnType<typeof getColors>;
   mirrorX?: boolean;
-  /** Intrinsic video size — enables object-fit:cover alignment on web. */
   videoWidth?: number;
   videoHeight?: number;
+  displayMode?: PoseOverlayDisplayMode;
 }
 
-function bonePath(
-  x1: number,
-  y1: number,
-  x2: number,
-  y2: number,
-): string {
+function bonePath(x1: number, y1: number, x2: number, y2: number): string {
   return `M ${x1.toFixed(1)} ${y1.toFixed(1)} L ${x2.toFixed(1)} ${y2.toFixed(1)}`;
 }
 
-/** View-based joint dots — reliable on Android when SVG Line/Circle fail. */
 function JointDots({
   keypoints,
   width,
@@ -46,6 +49,7 @@ function JointDots({
   boneColor,
   videoWidth,
   videoHeight,
+  displayMode,
 }: {
   keypoints: PoseKeypoint[];
   width: number;
@@ -54,30 +58,39 @@ function JointDots({
   boneColor: string;
   videoWidth?: number;
   videoHeight?: number;
+  displayMode: PoseOverlayDisplayMode;
 }) {
   const toPx = (x: number, y: number) =>
     videoNormToViewPx(x, y, videoWidth ?? 0, videoHeight ?? 0, width, height, mirrorX);
 
+  const indices =
+    displayMode === 'cpr_triangle'
+      ? CPR_TRIANGLE_KEYPOINT_INDICES
+      : keypoints.map((_, i) => i);
+
   return (
     <View style={StyleSheet.absoluteFill} pointerEvents="none">
-      {keypoints.map((kp, i) => {
-        if (kp.score < DRAW_SCORE_MIN) return null;
-        const isKey = CPR_KEYPOINT_INDICES.includes(i);
-        const size = isKey ? JOINT_SIZE : 8;
+      {indices.map(i => {
+        const kp = keypoints[i];
+        if (!kp || kp.score < DRAW_SCORE_MIN) return null;
+        const isEar = i === 3 || i === 4;
+        const isCprJoint = CPR_TRIANGLE_KEYPOINT_INDICES.includes(i);
+        const size = isEar ? EAR_SIZE : isCprJoint ? JOINT_SIZE : 8;
         const half = size / 2;
-        const color = isKey ? boneColor : 'rgba(255,255,255,0.9)';
+        const color = isCprJoint ? boneColor : 'rgba(255,255,255,0.9)';
+        const pos = toPx(kp.x, kp.y);
         return (
           <View
             key={`dot-${i}`}
             style={{
               position: 'absolute',
-              left: toPx(kp.x, kp.y).px - half,
-              top: toPx(kp.x, kp.y).py - half,
+              left: pos.px - half,
+              top: pos.py - half,
               width: size,
               height: size,
               borderRadius: half,
               backgroundColor: color,
-              borderWidth: isKey ? 2 : 1,
+              borderWidth: isCprJoint ? 2 : 1,
               borderColor: '#FFFFFF',
             }}
           />
@@ -96,34 +109,44 @@ export function PoseSkeletonOverlay({
   mirrorX = false,
   videoWidth,
   videoHeight,
+  displayMode = 'full',
 }: Props) {
   if (!width || !height) return null;
 
   const hasKeypoints = keypoints.length >= 17;
   const visibleJoints = keypoints.filter(kp => kp.score >= DRAW_SCORE_MIN).length;
+  const isTriangleMode = displayMode === 'cpr_triangle';
 
   const toPx = (x: number, y: number) =>
     videoNormToViewPx(x, y, videoWidth ?? 0, videoHeight ?? 0, width, height, mirrorX);
   const px = (x: number, y: number) => toPx(x, y).px;
   const py = (x: number, y: number) => toPx(x, y).py;
 
-  const zoneX = STERNAL_ZONE.x * width;
-  const zoneY = STERNAL_ZONE.y * height;
-  const zoneW = STERNAL_ZONE.w * width;
-  const zoneH = STERNAL_ZONE.h * height;
-  const inZone = result.shouldersOverWrists && result.quality === 'good';
+  const zone = LOW_ANGLE_FRAMING_ZONE;
+  const zoneX = zone.x * width;
+  const zoneY = zone.y * height;
+  const zoneW = zone.w * width;
+  const zoneH = zone.h * height;
+  const inZone = isTriangleMode ? result.framingOk : result.shouldersOverWrists && result.quality === 'good';
   const zoneColor = inZone ? '#00E676' : Colors.accent;
   const zoneFill = inZone ? 'rgba(0,230,118,0.12)' : 'rgba(229,57,53,0.10)';
+  const zoneLabel = isTriangleMode
+    ? (inZone ? 'READY TO START' : 'ALIGN IN FRAME')
+    : (inZone ? 'CORRECT POSITION' : 'STERNAL TARGET');
 
   const boneColor =
     result.quality === 'good' ? '#00E676' :
     result.quality === 'fair' ? '#FFD600' : '#E53935';
 
-  const lineColor = (a: number, b: number): string => {
+  const connections = isTriangleMode ? CPR_TRIANGLE_CONNECTIONS : SKELETON_CONNECTIONS;
+  const guideConnections = isTriangleMode && result.elbowBent ? CPR_GUIDE_CONNECTIONS : [];
+
+  const lineColor = (a: number, b: number, isGuide = false): string => {
     const ka = keypoints[a];
     const kb = keypoints[b];
     if (!ka || !kb) return 'rgba(255,255,255,0.15)';
-    const isCprBone = CPR_KEYPOINT_INDICES.includes(a) && CPR_KEYPOINT_INDICES.includes(b);
+    const isCprBone = CPR_TRIANGLE_KEYPOINT_INDICES.includes(a) && CPR_TRIANGLE_KEYPOINT_INDICES.includes(b);
+    if (isGuide) return 'rgba(255,255,255,0.25)';
     if (isCprBone && (ka.score >= DRAW_SCORE_MIN || kb.score >= DRAW_SCORE_MIN)) {
       return boneColor;
     }
@@ -135,6 +158,25 @@ export function PoseSkeletonOverlay({
 
   const w = Math.round(width);
   const h = Math.round(height);
+
+  const renderConnection = ([a, b]: [number, number], i: number, isGuide = false) => {
+    const ka = keypoints[a];
+    const kb = keypoints[b];
+    if (!ka || !kb) return null;
+    if (ka.score < DRAW_SCORE_MIN && kb.score < DRAW_SCORE_MIN) return null;
+    const isCprBone = CPR_TRIANGLE_KEYPOINT_INDICES.includes(a) && CPR_TRIANGLE_KEYPOINT_INDICES.includes(b);
+    return (
+      <Path
+        key={`${isGuide ? 'guide' : 'bone'}-${i}`}
+        d={bonePath(px(ka.x, ka.y), py(ka.x, ka.y), px(kb.x, kb.y), py(kb.x, kb.y))}
+        stroke={lineColor(a, b, isGuide)}
+        strokeWidth={isGuide ? 1.5 : isCprBone ? CPR_STROKE : 2}
+        strokeDasharray={isGuide ? '6 4' : undefined}
+        strokeLinecap="round"
+        fill="none"
+      />
+    );
+  };
 
   return (
     <View
@@ -169,26 +211,11 @@ export function PoseSkeletonOverlay({
           fontSize={10}
           fontWeight="bold"
         >
-          {inZone ? 'CORRECT POSITION' : 'STERNAL TARGET'}
+          {zoneLabel}
         </SvgText>
 
-        {hasKeypoints && SKELETON_CONNECTIONS.map(([a, b], i) => {
-          const ka = keypoints[a];
-          const kb = keypoints[b];
-          if (!ka || !kb) return null;
-          if (ka.score < DRAW_SCORE_MIN && kb.score < DRAW_SCORE_MIN) return null;
-          const isCprBone = CPR_KEYPOINT_INDICES.includes(a) && CPR_KEYPOINT_INDICES.includes(b);
-          return (
-            <Path
-              key={`bone-${i}`}
-              d={bonePath(px(ka.x, ka.y), py(ka.x, ka.y), px(kb.x, kb.y), py(kb.x, kb.y))}
-              stroke={lineColor(a, b)}
-              strokeWidth={isCprBone ? CPR_STROKE : 2}
-              strokeLinecap="round"
-              fill="none"
-            />
-          );
-        })}
+        {hasKeypoints && guideConnections.map((conn, i) => renderConnection(conn, i, true))}
+        {hasKeypoints && connections.map((conn, i) => renderConnection(conn, i))}
       </Svg>
 
       {hasKeypoints && visibleJoints > 0 && (
@@ -200,6 +227,7 @@ export function PoseSkeletonOverlay({
           boneColor={boneColor}
           videoWidth={videoWidth}
           videoHeight={videoHeight}
+          displayMode={displayMode}
         />
       )}
     </View>
