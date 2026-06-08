@@ -132,14 +132,25 @@ export function SimulationControls({
         );
 
       case 'post_aed_compressions':
-        return (
+        return cyclePhase === 'compress' ? (
           <View style={styles.simGroup}>
-            <Text style={[styles.simLabel, { color: ThemedColors.textSecondary }]}>Simulate Post-AED Compressions</Text>
+            <Text style={[styles.simLabel, { color: ThemedColors.textSecondary }]}>Simulate Post-Shock Compressions</Text>
             <SimButton
               label="Push Down"
               icon="arrow-down-bold"
               large
               onPress={onSimulateCompression}
+              colors={ThemedColors}
+            />
+          </View>
+        ) : (
+          <View style={styles.simGroup}>
+            <Text style={[styles.simLabel, { color: ThemedColors.textSecondary }]}>Simulate Rescue Breaths</Text>
+            <SimButton
+              label="Give Breath"
+              icon="weather-windy"
+              large
+              onPress={onSimulateBreath}
               colors={ThemedColors}
             />
           </View>

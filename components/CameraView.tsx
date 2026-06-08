@@ -553,6 +553,7 @@ import {
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import { PoseCameraView } from '@/components/PoseCameraView';
 import type { CPRPostureResult } from '@/lib/pose-analysis';
+import type { PoseCheckMode } from '@/lib/cpr-pose-constants';
 
 interface CameraViewProps {
   onHandDetected?: () => void;
@@ -561,6 +562,8 @@ interface CameraViewProps {
   overlayText?: string;
   enableHandTracking?: boolean;
   isPaused?: boolean;
+  poseCheckMode?: PoseCheckMode;
+  currentStepId?: string;
 }
 
 export default function CameraViewComponent({
@@ -570,6 +573,8 @@ export default function CameraViewComponent({
   overlayText,
   enableHandTracking = false,
   isPaused = false,
+  poseCheckMode = 'full_cpr',
+  currentStepId,
 }: CameraViewProps) {
   const [facing, setFacing] = useState<'front' | 'back'>('back');
 
@@ -659,6 +664,8 @@ export default function CameraViewComponent({
             showOverlay={showOverlay}
             overlayText={overlayText}
             isPaused={isPaused}
+            poseCheckMode={poseCheckMode}
+            currentStepId={currentStepId}
           />
         </View>
       </View>
@@ -716,6 +723,8 @@ export default function CameraViewComponent({
             showOverlay={showOverlay}
             overlayText={overlayText}
             isPaused={isPaused}
+            poseCheckMode={poseCheckMode}
+            currentStepId={currentStepId}
           />
         </View>
       </View>

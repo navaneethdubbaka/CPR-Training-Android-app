@@ -112,9 +112,9 @@ export const CPR_STEPS: CPRStep[] = [
     number: 9,
     title: 'Resume Compressions',
     instruction: 'Immediately resume chest compressions',
-    detail: 'After the shock, immediately resume CPR with 2 chest compressions at 100–120 BPM to confirm technique before continuing.',
+    detail: 'After the shock, immediately resume CPR with full 30:2 cycles (compressions + rescue breaths) at 100–120 BPM with pose feedback.',
     autoAdvance: true,
-    advanceCondition: '2_compressions',
+    advanceCondition: 'post_shock_cycles_complete',
     requiresSensor: true,
     sensorType: 'compression',
   },
@@ -138,4 +138,12 @@ export const COMPRESSION_ACCURACY_GATE = 0.8;
 export const CYCLES_TRAINING = 5;
 export const CYCLES_TESTING = 1;
 export const POST_AED_COMPRESSIONS_REQUIRED = 2;
+export const POST_SHOCK_CYCLES_TRAINING = 1;
+export const POST_SHOCK_CYCLES_TESTING = 1;
 export const COMPRESSION_SETS_REQUIRED = CYCLES_TRAINING;
+
+export const AED_STEP_IDS: CPRStepId[] = ['aed_pads', 'aed_analyze', 'aed_shock'];
+
+export function isAedStep(stepId: CPRStepId): boolean {
+  return AED_STEP_IDS.includes(stepId);
+}

@@ -131,31 +131,44 @@ For trying **pose + skeleton**, **Testing** or **Training** through to **step 4 
 
 ## 5. Using pose on the web (low-angle tablet setup)
 
+### Step-scoped pose modes
+
+| Steps | Camera | Pose checks |
+|-------|--------|-------------|
+| 1–3 (scene safety → call for help) | On | **Frame + look down only** (head & shoulders in box) |
+| 4–5 (hand placement → compressions) | On | **Full CPR pose** (ears, elbows, triangle, wrists) |
+| 6–8 (AED pads → shock) | **Off** | Paused — focus on AED panel |
+| 9–10 (post-shock compressions) | On | **Full CPR pose** + compression/breath feedback |
+
+You **cannot continue** until framing requirements are met for **~1 second** (skipped on AED steps).
+
 ### Camera placement
 
-Place the **phone or tablet on the ground at ~45°**, **front camera** facing the person performing CPR (screen toward the performer). The performer should fill the tall **ALIGN IN FRAME** box: ears at the top, shoulders mid-frame, interlocked hands at the bottom.
-
-You **cannot continue** to the next step until the app detects you inside the frame for about **1 second** (all camera steps).
+Place the **phone or tablet on the ground at ~45°**, **front camera** facing the person performing CPR (screen toward the performer). Early steps only require **head and shoulders** in the tall **ALIGN IN FRAME** box; from step 4 onward, wrists should also be visible.
 
 ### What you should see
 
 1. Wait for **“Loading pose model…”** then **POSE · wasm** or **POSE · webgl** (first load ~15–30 s).
-2. **Framing box** — red **ALIGN IN FRAME** → green **READY TO START** when head, shoulders, and hands are inside.
-3. **CPR triangle overlay** — shoulders, straight arms, wrists only (no full-body skeleton).
-4. **Live cue chips** — ears visible, looking down, elbows straight, triangle formed.
-5. **Voice cues** (web) — e.g. *“Keep the elbow straight”*, same style as compression rate/depth alerts.
+2. **Framing box** — red **ALIGN IN FRAME** → green **READY TO START** when requirements are met.
+3. **Ring-style joint markers** on shoulders, elbows, wrists (full pose steps).
+4. **Live cue chips** — frame + look down on steps 1–3; all five chips from step 4 onward.
+5. **Voice cues** (web) — logged to the session report on the completion screen.
 
 ### Hand placement (step 4)
 
-Hold **full good posture** for **1.5 seconds** to auto-verify:
+Hold **full good posture** for **1.5 seconds** to auto-verify (ears, look down, straight elbows, triangle). Or use **Verify Hands** in simulation mode.
 
-- In frame (ears, shoulders, wrists visible in box)
-- Both ears visible
-- Looking down at chest (estimated from head angle — not true eye tracking)
-- Straight elbows
-- Shoulder–hand triangle
+### Post-shock cycles (step 9)
 
-Or use **Verify Hands** in simulation mode if pose is unavailable.
+After AED shock, resume **30:2 compressions + rescue breaths** with the same pose and feedback as step 5. Default is **1 full cycle** (configurable in `constants/cpr-protocol.ts` via `POST_SHOCK_CYCLES_TRAINING`).
+
+### Session log & snapshots (web)
+
+Coaching alerts (pose + sensor) are recorded during training. Up to **4 random video snapshots** are captured from the live feed. On the **completion screen**, expand **Session Log** and use **Download Report (JSON)** to export events and embedded snapshot images.
+
+### Force sensors (optional hardware)
+
+Assign **Compression Force** to an analog channel in Settings. Calibrate **offset** (zero at rest) and set **min peak threshold** in the monitor tab. When depth is unavailable, compressions are detected from force peaks; when both depth and force are assigned, both must pass thresholds.
 
 ### Limitations (share with trainees)
 

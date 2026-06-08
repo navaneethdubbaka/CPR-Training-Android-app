@@ -5,7 +5,10 @@ import { StatusBar } from 'expo-status-bar';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { getColors } from '@/constants/colors';
 import { useTheme } from '@/contexts/ThemeContext';
-import { CPR_STEPS, CYCLES_TRAINING, CYCLES_TESTING, POST_AED_COMPRESSIONS_REQUIRED, COMPRESSIONS_PER_CYCLE, BREATHS_PER_CYCLE } from '@/constants/cpr-protocol';
+import {
+  CPR_STEPS, CYCLES_TRAINING, CYCLES_TESTING, POST_SHOCK_CYCLES_TRAINING, POST_SHOCK_CYCLES_TESTING,
+  COMPRESSIONS_PER_CYCLE, BREATHS_PER_CYCLE, isAedStep,
+} from '@/constants/cpr-protocol';
 import { useCPRTraining } from '@/contexts/CPRTrainingContext';
 import { StepIndicator } from '@/components/StepIndicator';
 import { InstructionPanel } from '@/components/InstructionPanel';
@@ -21,7 +24,7 @@ import { SettingsModal } from '@/components/SettingsModal';
 import { EnduranceScreen } from '@/components/EnduranceScreen';
 import { StepVideo } from '@/components/StepVideo';
 import type { CPRPostureResult } from '@/lib/pose-analysis';
-import { FRAMING_HOLD_MS } from '@/lib/cpr-pose-constants';
+import { FRAMING_HOLD_MS, getPoseCheckModeForStep, isFramingGateReady } from '@/lib/cpr-pose-constants';
 
 const ENABLE_POSE_VOICE_CUES = Platform.OS === 'web';
 
@@ -48,6 +51,7 @@ export default function TrainingScreen() {
     sensorData, connectionStatus, connectionMode, hardwareOnly, metrics, stepTimer,
     aedShockDelivered, handPlacementVerified, postAedCompressionCount,
     cyclePhase, cycleCompressionCount, cycleBreathCount, completedCycles,
+    postShockCyclePhase, postShockCycleCompressionCount, postShockCycleBreathCount, postShockCompletedCycles,
     startTraining, pauseTraining, resumeTraining, resetTraining,
     advanceStep, goToStep, connectArduino, disconnectArduino,
     simulateSensor, deliverShock, verifyHandPlacement, simulateCompression, simulateBreath,
@@ -60,12 +64,18 @@ export default function TrainingScreen() {
   const isCOLS = mode === 'cols';
 
   const totalCycles = isTesting ? CYCLES_TESTING : CYCLES_TRAINING;
+  const postShockTotalCycles = isTesting ? POST_SHOCK_CYCLES_TESTING : POST_SHOCK_CYCLES_TRAINING;
+  const poseCheckMode = getPoseCheckModeForStep(currentStepId);
+  const showVisualCamera = !isAedStep(currentStepId);
+  const showPoseTracking = showVisualCamera && poseCheckMode !== null;
+
+  const framingMessage = poseCheckMode === 'framing_only'
+    ? 'Align your head and shoulders inside the box, then look down at the chest'
+    : 'Adjust camera until your head, shoulders, and hands are inside the box';
 
   useEffect(() => {
     setVoiceCompleted(false);
   }, [currentStepIndex]);
-
-  const showPoseTracking = true;
 
   useEffect(() => {
     framingSinceRef.current = null;
@@ -74,13 +84,17 @@ export default function TrainingScreen() {
 
   useEffect(() => {
     const poseFramingRequired = showPoseTracking && Platform.OS === 'web';
-    if (!poseFramingRequired) {
+    if (!poseFramingRequired || isAedStep(currentStepId)) {
       setFramingGateOpen(true);
       framingSinceRef.current = null;
       return;
     }
 
-    if (!postureResult?.framingOk) {
+    const gateReady = postureResult && poseCheckMode
+      ? isFramingGateReady(postureResult, poseCheckMode)
+      : false;
+
+    if (!gateReady) {
       framingSinceRef.current = null;
       setFramingGateOpen(false);
       return;
@@ -99,10 +113,12 @@ export default function TrainingScreen() {
     }
 
     const timer = setTimeout(() => {
-      if (postureResult?.framingOk) setFramingGateOpen(true);
+      if (postureResult && poseCheckMode && isFramingGateReady(postureResult, poseCheckMode)) {
+        setFramingGateOpen(true);
+      }
     }, FRAMING_HOLD_MS - elapsed);
     return () => clearTimeout(timer);
-  }, [postureResult?.framingOk, showPoseTracking, framingGateOpen]);
+  }, [postureResult, showPoseTracking, framingGateOpen, poseCheckMode, currentStepId]);
 
 
     //Satya Code
@@ -135,11 +151,11 @@ useEffect(() => {
       case 'aed_shock':
         return aedShockDelivered;
       case 'post_aed_compressions':
-        return postAedCompressionCount >= POST_AED_COMPRESSIONS_REQUIRED;
+        return postShockCompletedCycles >= postShockTotalCycles;
       default:
         return false;
     }
-  }, [currentStep, sensorData, stepTimer, handPlacementVerified, completedCycles, totalCycles, aedShockDelivered, postAedCompressionCount, shoulderTapDone, voiceCompleted]);
+  }, [currentStep, sensorData, stepTimer, handPlacementVerified, completedCycles, totalCycles, aedShockDelivered, postShockCompletedCycles, postShockTotalCycles, shoulderTapDone, voiceCompleted]);
 
   const stepCanAdvance = framingGateOpen && (
     currentStep?.autoAdvance ? canAutoAdvance : true
@@ -172,20 +188,23 @@ useEffect(() => {
       }
       case 'aed_analyze':
         return `Analyzing: ${stepTimer}s / 5s`;
-      case 'post_aed_compressions':
-        return `${postAedCompressionCount}/${POST_AED_COMPRESSIONS_REQUIRED} post-AED compressions`;
+      case 'post_aed_compressions': {
+        if (postShockCyclePhase === 'compress') {
+          return `Compressions: ${postShockCycleCompressionCount}/${COMPRESSIONS_PER_CYCLE} | Cycles: ${postShockCompletedCycles}/${postShockTotalCycles}`;
+        }
+        return `Rescue breaths: ${postShockCycleBreathCount}/${BREATHS_PER_CYCLE} | Cycles: ${postShockCompletedCycles}/${postShockTotalCycles}`;
+      }
       default:
         return undefined;
     }
-  }, [currentStep, sensorData, stepTimer, handPlacementVerified, cyclePhase, cycleCompressionCount, cycleBreathCount, completedCycles, totalCycles, postAedCompressionCount]);
+  }, [currentStep, sensorData, stepTimer, handPlacementVerified, cyclePhase, cycleCompressionCount, cycleBreathCount, completedCycles, totalCycles, postShockCyclePhase, postShockCycleCompressionCount, postShockCycleBreathCount, postShockCompletedCycles, postShockTotalCycles]);
 
-  const showCameraStep = currentStep?.requiresCamera || currentStep?.id === 'compressions';
-  const showAED = currentStep?.id === 'aed_pads' || currentStep?.id === 'aed_analyze' || currentStep?.id === 'aed_shock';
-  const showVisualCamera = true;
+  const showAED = isAedStep(currentStepId);
   const framingBlocked = Platform.OS === 'web' && showPoseTracking && !framingGateOpen;
-  const showCompressions = currentStep?.id === 'compressions' && cyclePhase === 'compress';
-  const showPostAedCompressions = currentStep?.id === 'post_aed_compressions';
-  const showBreaths = currentStep?.id === 'compressions' && cyclePhase === 'breathe';
+  const showPostShockCycles = currentStep?.id === 'post_aed_compressions';
+  const activeCyclePhase = showPostShockCycles ? postShockCyclePhase : cyclePhase;
+  const showCompressions = (currentStep?.id === 'compressions' || showPostShockCycles) && activeCyclePhase === 'compress';
+  const showBreaths = (currentStep?.id === 'compressions' || showPostShockCycles) && activeCyclePhase === 'breathe';
 
   const styles = makeStyles(Colors);
 
@@ -258,6 +277,8 @@ useEffect(() => {
           breathCount={metrics.breaths.totalBreaths}
           goodBreaths={metrics.breaths.goodBreaths}
           overallScore={metrics.overallScore}
+          coachingEvents={metrics.coachingEvents}
+          snapshots={metrics.snapshots}
           onRestart={resetTraining}
         />
       </>
@@ -283,6 +304,8 @@ useEffect(() => {
             onPostureResult={setPostureResult}
             enableHandTracking={showPoseTracking}
             isPaused={isPaused}
+            poseCheckMode={poseCheckMode ?? 'full_cpr'}
+            currentStepId={currentStepId}
           />
         </View>
       )}
@@ -302,7 +325,7 @@ useEffect(() => {
       {!hardwareOnly && (
         <SimulationControls
           currentStepId={currentStepId}
-          cyclePhase={cyclePhase}
+          cyclePhase={activeCyclePhase}
           onSimulateSensor={simulateSensor}
           onSimulateCompression={simulateCompression}
           onSimulateBreath={simulateBreath}
@@ -331,7 +354,7 @@ useEffect(() => {
         onAdvance={advanceStep}
         canAdvance={stepCanAdvance}
         framingBlocked={framingBlocked}
-        framingMessage="Adjust camera until your head, shoulders, and hands are inside the box"
+        framingMessage={framingMessage}
         autoAdvanceText={getAutoAdvanceText()}
         hardwareOnly={hardwareOnly}
         hideHints={isTesting}
@@ -345,28 +368,30 @@ useEffect(() => {
         totalCycles={totalCycles}
       />
 
-      {(showCompressions || showPostAedCompressions) && (
+      {showCompressions && (
         <CompressionFeedback
-          count={showPostAedCompressions ? postAedCompressionCount : metrics.compressions.count}
+          count={showPostShockCycles ? postShockCycleCompressionCount : metrics.compressions.count}
           currentRate={metrics.compressions.currentRate}
           currentDepth={metrics.compressions.currentDepth}
-          //currentDepth={8}
+          currentForce={sensorData.compressionForce}
           avgRate={metrics.compressions.avgRate}
           avgDepth={metrics.compressions.avgDepth}
           goodCount={metrics.compressions.goodCompressions}
           totalCount={metrics.compressions.totalCompressions}
-          postureResult={showCompressions ? postureResult : undefined}
+          postureResult={postureResult}
           enablePoseVoiceCues={ENABLE_POSE_VOICE_CUES}
+          poseCheckMode={poseCheckMode ?? 'full_cpr'}
+          stepId={currentStepId}
           sets={undefined}
           currentSetIndex={undefined}
-          setsRequired={totalCycles}
+          setsRequired={showPostShockCycles ? postShockTotalCycles : totalCycles}
           showSets={false}
         />
       )}
 
       {showBreaths && (
         <BreathFeedback
-          count={cycleBreathCount}
+          count={showPostShockCycles ? postShockCycleBreathCount : cycleBreathCount}
           currentPressure={metrics.breaths.currentPressure}
           goodBreaths={metrics.breaths.goodBreaths}
           totalBreaths={metrics.breaths.totalBreaths}

@@ -1,10 +1,12 @@
-import React, { useEffect } from 'react';
-import { View, Text, StyleSheet, Pressable, ScrollView, Platform } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { View, Text, StyleSheet, Pressable, ScrollView, Platform, Image } from 'react-native';
 import Animated, { useSharedValue, useAnimatedStyle, withTiming, withDelay, withSpring } from 'react-native-reanimated';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getColors } from '@/constants/colors';
 import { useTheme } from '@/contexts/ThemeContext';
+import type { CoachingEvent, SessionSnapshot } from '@/lib/session-recorder';
+import { sessionRecorder } from '@/lib/session-recorder';
 
 interface CompletionScreenProps {
   elapsedTime: number;
@@ -15,6 +17,8 @@ interface CompletionScreenProps {
   breathCount: number;
   goodBreaths: number;
   overallScore: number;
+  coachingEvents?: CoachingEvent[];
+  snapshots?: SessionSnapshot[];
   onRestart: () => void;
 }
 
@@ -49,13 +53,15 @@ function AnimatedStat({ label, value, unit, delay, color, surfaceColor, mutedCol
 export function CompletionScreen({
   elapsedTime, compressionCount, goodCompressions,
   avgRate, avgDepth, breathCount, goodBreaths,
-  overallScore, onRestart,
+  overallScore, coachingEvents = [], snapshots = [],
+  onRestart,
 }: CompletionScreenProps) {
   const insets = useSafeAreaInsets();
   const topInset = Platform.OS === 'web' ? 40 : insets.top;
   const { theme } = useTheme();
   const Colors = getColors(theme);
   const scoreScale = useSharedValue(0);
+  const [logExpanded, setLogExpanded] = useState(false);
 
   useEffect(() => {
     scoreScale.value = withDelay(200, withSpring(1, { damping: 12 }));
@@ -72,11 +78,37 @@ export function CompletionScreen({
     return `${min}:${sec.toString().padStart(2, '0')}`;
   };
 
+  const formatEventTime = (ts: number) => {
+    const d = new Date(ts);
+    return `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}:${d.getSeconds().toString().padStart(2, '0')}`;
+  };
+
   const scoreColor = overallScore >= 80 ? Colors.feedbackGood :
                      overallScore >= 50 ? Colors.feedbackOk : Colors.feedbackBad;
   const scoreGrade = overallScore >= 90 ? 'Excellent' :
                      overallScore >= 80 ? 'Good' :
                      overallScore >= 60 ? 'Needs Practice' : 'Keep Trying';
+
+  const handleDownloadReport = () => {
+    if (Platform.OS !== 'web' || typeof document === 'undefined') return;
+    const report = sessionRecorder.exportReport({
+      elapsedTime,
+      compressionCount,
+      goodCompressions,
+      avgRate,
+      avgDepth,
+      breathCount,
+      goodBreaths,
+      overallScore,
+    });
+    const blob = new Blob([report], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `cpr-session-${Date.now()}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
 
   return (
     <ScrollView
@@ -99,6 +131,59 @@ export function CompletionScreen({
         <AnimatedStat label="Breaths" value={`${goodBreaths}/${breathCount}`} delay={700} color={Colors.info} surfaceColor={Colors.surface} mutedColor={Colors.textMuted} />
         <AnimatedStat label="Quality" value={`${overallScore}%`} delay={800} color={scoreColor} surfaceColor={Colors.surface} mutedColor={Colors.textMuted} />
       </View>
+
+      {(coachingEvents.length > 0 || snapshots.length > 0) && (
+        <View style={[styles.logSection, { backgroundColor: Colors.surface, borderColor: Colors.border }]}>
+          <Pressable style={styles.logHeader} onPress={() => setLogExpanded(v => !v)}>
+            <MaterialCommunityIcons name="clipboard-text-outline" size={18} color={Colors.info} />
+            <Text style={[styles.logTitle, { color: Colors.text }]}>
+              Session Log ({coachingEvents.length} alerts, {snapshots.length} snapshots)
+            </Text>
+            <MaterialCommunityIcons
+              name={logExpanded ? 'chevron-up' : 'chevron-down'}
+              size={20}
+              color={Colors.textMuted}
+            />
+          </Pressable>
+
+          {logExpanded && (
+            <View style={styles.logBody}>
+              {snapshots.length > 0 && (
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.thumbStrip}>
+                  {snapshots.map(snap => (
+                    <View key={snap.id} style={styles.thumbWrap}>
+                      {Platform.OS === 'web' ? (
+                        <img src={snap.dataUrl} alt={`Snapshot ${snap.id}`} style={{ width: 80, height: 60, borderRadius: 6, objectFit: 'cover' } as React.CSSProperties} />
+                      ) : (
+                        <Image source={{ uri: snap.dataUrl }} style={styles.thumb} />
+                      )}
+                      <Text style={[styles.thumbLabel, { color: Colors.textMuted }]}>{snap.stepId}</Text>
+                    </View>
+                  ))}
+                </ScrollView>
+              )}
+              {coachingEvents.slice(-8).map(evt => (
+                <View key={evt.id} style={styles.logRow}>
+                  <Text style={[styles.logTime, { color: Colors.textMuted }]}>{formatEventTime(evt.timestamp)}</Text>
+                  <Text style={[styles.logMsg, { color: Colors.textSecondary }]} numberOfLines={2}>
+                    [{evt.source}] {evt.message}
+                  </Text>
+                </View>
+              ))}
+            </View>
+          )}
+        </View>
+      )}
+
+      {Platform.OS === 'web' && (coachingEvents.length > 0 || snapshots.length > 0) && (
+        <Pressable
+          style={({ pressed }) => [styles.downloadBtn, { backgroundColor: Colors.surface, borderColor: Colors.border }, pressed && { opacity: 0.8 }]}
+          onPress={handleDownloadReport}
+        >
+          <MaterialCommunityIcons name="download" size={20} color={Colors.info} />
+          <Text style={[styles.downloadText, { color: Colors.info }]}>Download Report (JSON)</Text>
+        </Pressable>
+      )}
 
       <Pressable
         style={({ pressed }) => [styles.restartBtn, { backgroundColor: Colors.accent }, pressed && { opacity: 0.8 }]}
@@ -177,6 +262,72 @@ const styles = StyleSheet.create({
   statUnit: {
     fontSize: 12,
     fontWeight: '600',
+  },
+  logSection: {
+    width: '100%',
+    maxWidth: 500,
+    borderRadius: 12,
+    borderWidth: 1,
+    overflow: 'hidden',
+  },
+  logHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    padding: 14,
+  },
+  logTitle: {
+    flex: 1,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  logBody: {
+    paddingHorizontal: 14,
+    paddingBottom: 14,
+    gap: 8,
+  },
+  thumbStrip: {
+    marginBottom: 8,
+  },
+  thumbWrap: {
+    marginRight: 8,
+    alignItems: 'center',
+    gap: 4,
+  },
+  thumb: {
+    width: 80,
+    height: 60,
+    borderRadius: 6,
+  },
+  thumbLabel: {
+    fontSize: 9,
+  },
+  logRow: {
+    flexDirection: 'row',
+    gap: 8,
+    alignItems: 'flex-start',
+  },
+  logTime: {
+    fontSize: 10,
+    fontWeight: '600',
+    width: 52,
+  },
+  logMsg: {
+    flex: 1,
+    fontSize: 11,
+  },
+  downloadBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+  },
+  downloadText: {
+    fontSize: 14,
+    fontWeight: '700',
   },
   restartBtn: {
     flexDirection: 'row',

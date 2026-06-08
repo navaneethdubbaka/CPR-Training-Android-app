@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type RefObject } from 'react';
 import '@tensorflow/tfjs-backend-wasm';
 import '@tensorflow/tfjs-backend-webgl';
 import '@tensorflow/tfjs-backend-cpu';
+import type { PoseCheckMode } from './cpr-pose-constants';
 import {
   analyzeCPRPosture,
   KEYPOINT_NAMES,
@@ -106,6 +107,7 @@ export function useWebPoseDetector(
   enabled: boolean,
   onPostureResult: (keypoints: PoseKeypoint[], result: CPRPostureResult) => void,
   mirrorX = true,
+  checkMode: PoseCheckMode = 'full_cpr',
 ): { state: WebPoseDetectorState; errorMessage: string | null; backend: string | null; retry: () => void } {
   const [state, setState] = useState<WebPoseDetectorState>('loading');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -178,7 +180,7 @@ export function useWebPoseDetector(
                 const w = video.videoWidth || video.clientWidth || 1;
                 const h = video.videoHeight || video.clientHeight || 1;
                 const kps = toNormalizedKeypoints(pose.keypoints, w, h, mirrorX);
-                onPostureResult(kps, analyzeCPRPosture(kps, 'low_angle_45'));
+                onPostureResult(kps, analyzeCPRPosture(kps, 'low_angle_45', checkMode));
               }
             })
             .catch(() => {})
@@ -193,7 +195,7 @@ export function useWebPoseDetector(
 
     rafRef.current = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(rafRef.current);
-  }, [enabled, state, videoRef, onPostureResult, mirrorX]);
+  }, [enabled, state, videoRef, onPostureResult, mirrorX, checkMode]);
 
   return { state, errorMessage, backend, retry };
 }

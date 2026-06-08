@@ -1,18 +1,37 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { getColors } from '@/constants/colors';
 import type { CPRPostureResult } from '@/lib/pose-analysis';
+import type { PoseCheckMode } from '@/lib/cpr-pose-constants';
 import { getPoseCueChips } from '@/lib/coaching-cues';
+import { sessionRecorder } from '@/lib/session-recorder';
 
 interface Props {
   result: CPRPostureResult;
   Colors: ReturnType<typeof getColors>;
   compact?: boolean;
+  checkMode?: PoseCheckMode;
+  stepId?: string;
 }
 
-export function PoseCueChips({ result, Colors, compact = false }: Props) {
-  const chips = getPoseCueChips(result);
+export function PoseCueChips({ result, Colors, compact = false, checkMode = 'full_cpr', stepId }: Props) {
+  const chips = getPoseCueChips(result, checkMode);
+  const prevOkRef = useRef<Record<string, boolean>>({});
+
+  useEffect(() => {
+    if (!stepId) return;
+    for (const chip of chips) {
+      const wasOk = prevOkRef.current[chip.id];
+      if (wasOk === false && chip.ok) {
+        sessionRecorder.clearChipFailure(chip.id, stepId);
+      }
+      if (chip.ok === false && wasOk !== false) {
+        sessionRecorder.logChipFailure(stepId, chip.id, chip.label);
+      }
+      prevOkRef.current[chip.id] = chip.ok;
+    }
+  }, [chips, stepId]);
 
   return (
     <View style={[styles.row, compact && styles.rowCompact]}>

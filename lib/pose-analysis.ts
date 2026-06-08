@@ -11,6 +11,7 @@ import {
   POSE_CONF_EAR,
   POSE_CONF_NOSE,
   type PoseAnalysisProfile,
+  type PoseCheckMode,
   TRIANGLE_ELBOW_LINE_MAX_DIST,
   TRIANGLE_WRIST_BELOW_SHOULDER_Y,
   TRIANGLE_WRIST_NARROWER_RATIO,
@@ -150,6 +151,32 @@ function checkFraming(keypoints: PoseKeypoint[]): boolean {
   return earsOk && shouldersOk && wristsOk;
 }
 
+/** Steps 1–3: head + shoulders in frame, no wrists required. */
+function checkFramingLite(keypoints: PoseKeypoint[]): boolean {
+  const nose = keypoints[KP.NOSE];
+  const le = keypoints[KP.LEFT_EAR];
+  const re = keypoints[KP.RIGHT_EAR];
+  const ls = keypoints[KP.LEFT_SHOULDER];
+  const rs = keypoints[KP.RIGHT_SHOULDER];
+
+  const shouldersOk =
+    ls.score > POSE_CONF_DEFAULT && rs.score > POSE_CONF_DEFAULT &&
+    isInsideZone(ls.x, ls.y, LOW_ANGLE_FRAMING_ZONE) &&
+    isInsideZone(rs.x, rs.y, LOW_ANGLE_FRAMING_ZONE);
+
+  const bothEarsOk =
+    le.score > POSE_CONF_EAR && re.score > POSE_CONF_EAR &&
+    isInsideZone(le.x, le.y, LOW_ANGLE_FRAMING_ZONE) &&
+    isInsideZone(re.x, re.y, LOW_ANGLE_FRAMING_ZONE);
+
+  const noseOk =
+    nose.score > POSE_CONF_NOSE &&
+    isInsideZone(nose.x, nose.y, LOW_ANGLE_FRAMING_ZONE);
+
+  const headOk = bothEarsOk || noseOk;
+  return shouldersOk && headOk;
+}
+
 function checkLookingDown(
   nose: PoseKeypoint,
   leftEar: PoseKeypoint,
@@ -162,7 +189,6 @@ function checkLookingDown(
   if (lw.score < POSE_CONF_DEFAULT || rw.score < POSE_CONF_DEFAULT) return false;
 
   const midEarY = (leftEar.y + rightEar.y) / 2;
-  const midEarX = (leftEar.x + rightEar.x) / 2;
   const midWristX = (lw.x + rw.x) / 2;
   const midWristY = (lw.y + rw.y) / 2;
 
@@ -171,6 +197,23 @@ function checkLookingDown(
   const noseAboveWrists = nose.y < midWristY - LOOK_DOWN_NOSE_ABOVE_WRIST_Y;
 
   return noseBelowEars && noseNearHands && noseAboveWrists;
+}
+
+/** Early steps: nose below ear midpoint (no wrists needed). */
+function checkLookingDownLite(
+  nose: PoseKeypoint,
+  leftEar: PoseKeypoint,
+  rightEar: PoseKeypoint,
+): boolean {
+  if (nose.score < POSE_CONF_NOSE) return false;
+  if (leftEar.score < POSE_CONF_EAR && rightEar.score < POSE_CONF_EAR) return false;
+
+  const midEarY =
+    leftEar.score > POSE_CONF_EAR && rightEar.score > POSE_CONF_EAR
+      ? (leftEar.y + rightEar.y) / 2
+      : leftEar.score > rightEar.score ? leftEar.y : rightEar.y;
+
+  return nose.y > midEarY + LOOK_DOWN_NOSE_BELOW_EAR_Y * 0.5;
 }
 
 function checkTriangle(
@@ -195,22 +238,68 @@ function checkTriangle(
   return wristsBelow && wristsNarrower && leftElbowOnLine && rightElbowOnLine;
 }
 
-function buildLowAngleTips(result: {
-  framingOk: boolean;
-  earsVisible: boolean;
-  lookingDown: boolean;
-  armsAreStraight: boolean;
-  triangleFormed: boolean;
-  armsVisible: boolean;
-}): string[] {
+function buildLowAngleTips(
+  result: {
+    framingOk: boolean;
+    earsVisible: boolean;
+    lookingDown: boolean;
+    armsAreStraight: boolean;
+    triangleFormed: boolean;
+    armsVisible: boolean;
+  },
+  mode: PoseCheckMode,
+): string[] {
   const tips: string[] = [];
   if (!result.framingOk) tips.push('Move into the frame');
-  if (!result.earsVisible) tips.push('Show both ears in frame');
   if (!result.lookingDown) tips.push('Look down at the chest');
+  if (mode === 'framing_only') return tips;
+
+  if (!result.earsVisible) tips.push('Show both ears in frame');
   if (result.armsVisible && !result.armsAreStraight) tips.push('Keep the elbow straight');
   if (!result.triangleFormed) tips.push('Stack shoulders over hands');
   if (!result.armsVisible) tips.push('Raise hands into camera view');
   return tips;
+}
+
+function analyzeFramingOnly(keypoints: PoseKeypoint[]): CPRPostureResult {
+  const nose = keypoints[KP.NOSE];
+  const leEar = keypoints[KP.LEFT_EAR];
+  const reEar = keypoints[KP.RIGHT_EAR];
+
+  const framingOk = checkFramingLite(keypoints);
+  const lookingDown = checkLookingDownLite(nose, leEar, reEar);
+  const tips = buildLowAngleTips({
+    framingOk,
+    earsVisible: false,
+    lookingDown,
+    armsAreStraight: true,
+    triangleFormed: true,
+    armsVisible: false,
+  }, 'framing_only');
+
+  let quality: 'good' | 'fair' | 'poor' | 'none';
+  if (framingOk && lookingDown) {
+    quality = 'good';
+  } else if (framingOk || lookingDown) {
+    quality = 'fair';
+  } else {
+    quality = 'none';
+  }
+
+  return {
+    quality,
+    leftArmAngle: 0,
+    rightArmAngle: 0,
+    armsVisible: false,
+    armsAreStraight: true,
+    shouldersOverWrists: false,
+    earsVisible: false,
+    lookingDown,
+    triangleFormed: true,
+    framingOk,
+    elbowBent: false,
+    tips,
+  };
 }
 
 function analyzeLegacy(keypoints: PoseKeypoint[]): CPRPostureResult {
@@ -269,7 +358,11 @@ function analyzeLegacy(keypoints: PoseKeypoint[]): CPRPostureResult {
   };
 }
 
-function analyzeLowAngle45(keypoints: PoseKeypoint[]): CPRPostureResult {
+function analyzeLowAngle45(keypoints: PoseKeypoint[], mode: PoseCheckMode): CPRPostureResult {
+  if (mode === 'framing_only') {
+    return analyzeFramingOnly(keypoints);
+  }
+
   const nose = keypoints[KP.NOSE];
   const leEar = keypoints[KP.LEFT_EAR];
   const reEar = keypoints[KP.RIGHT_EAR];
@@ -320,7 +413,7 @@ function analyzeLowAngle45(keypoints: PoseKeypoint[]): CPRPostureResult {
     triangleFormed,
     armsVisible,
   };
-  const tips = buildLowAngleTips(partial);
+  const tips = buildLowAngleTips(partial, 'full_cpr');
 
   let quality: 'good' | 'fair' | 'poor' | 'none';
   if (isLowAnglePostureGood(partial)) {
@@ -348,7 +441,6 @@ function analyzeLowAngle45(keypoints: PoseKeypoint[]): CPRPostureResult {
   };
 }
 
-/** Normalize MoveNet output to 0–1 for overlay (handles pixel coords and slight >1 values). */
 export function parseKeypointsFromFlat(flat: number[]): PoseKeypoint[] {
   const kps: PoseKeypoint[] = [];
   for (let i = 0; i < 17; i++) {
@@ -381,13 +473,14 @@ export function parseKeypointsFromFlat(flat: number[]): PoseKeypoint[] {
 export function analyzeCPRPosture(
   keypoints: PoseKeypoint[],
   profile: PoseAnalysisProfile = 'legacy',
+  checkMode: PoseCheckMode = 'full_cpr',
 ): CPRPostureResult {
   if (keypoints.length < 17) {
     return { ...EMPTY_POSTURE_RESULT };
   }
 
   if (profile === 'low_angle_45') {
-    return analyzeLowAngle45(keypoints);
+    return analyzeLowAngle45(keypoints, checkMode);
   }
   return analyzeLegacy(keypoints);
 }

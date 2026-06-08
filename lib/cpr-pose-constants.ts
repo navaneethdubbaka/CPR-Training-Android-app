@@ -33,6 +33,35 @@ export const FRAMING_HOLD_MS = 1000;
 export const HAND_PLACEMENT_HOLD_MS = 1500;
 
 export type PoseAnalysisProfile = 'legacy' | 'low_angle_45';
+export type PoseCheckMode = 'framing_only' | 'full_cpr';
+
+const FRAMING_ONLY_STEPS = new Set([
+  'scene_safety',
+  'check_responsiveness',
+  'call_911',
+]);
+
+const FULL_CPR_STEPS = new Set([
+  'hand_placement',
+  'compressions',
+  'post_aed_compressions',
+  'post_shock',
+]);
+
+export function getPoseCheckModeForStep(stepId: string): PoseCheckMode | null {
+  if (FRAMING_ONLY_STEPS.has(stepId)) return 'framing_only';
+  if (FULL_CPR_STEPS.has(stepId)) return 'full_cpr';
+  return null;
+}
+
+/** Gate ready: framing_only needs frame + look down; full_cpr needs framingOk. */
+export function isFramingGateReady(
+  result: { framingOk: boolean; lookingDown: boolean },
+  mode: PoseCheckMode,
+): boolean {
+  if (mode === 'framing_only') return result.framingOk && result.lookingDown;
+  return result.framingOk;
+}
 
 /** CPR triangle overlay connections only. */
 export const CPR_TRIANGLE_CONNECTIONS: [number, number][] = [

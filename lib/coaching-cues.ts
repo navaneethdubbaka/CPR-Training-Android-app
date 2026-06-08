@@ -1,14 +1,19 @@
 import * as Speech from 'expo-speech';
 import type { CPRPostureResult } from '@/lib/pose-analysis';
+import type { PoseCheckMode } from '@/lib/cpr-pose-constants';
 import { COMPRESSION_TARGET_RATE, COMPRESSION_TARGET_DEPTH } from '@/constants/cpr-protocol';
+import { sessionRecorder } from '@/lib/session-recorder';
 
 let lastSpokenAt = 0;
 
-export function speakCoachingCue(text: string): void {
+export function speakCoachingCue(text: string, source: 'pose' | 'sensor' = 'pose', stepId?: string): void {
   try {
     const now = Date.now();
     if (now - lastSpokenAt < 3000) return;
     lastSpokenAt = now;
+    if (stepId) {
+      sessionRecorder.logCoachingEvent(stepId, source, text);
+    }
     Speech.speak(text, {
       language: 'en-US',
       pitch: 1.0,
@@ -32,13 +37,12 @@ export function pickSensorCue(currentRate: number, currentDepth: number): string
   return null;
 }
 
-export function pickPoseCue(result: CPRPostureResult): string | null {
-  if (result.quality === 'none' && !result.framingOk) {
-    return 'Move into the frame';
-  }
+export function pickPoseCue(result: CPRPostureResult, mode: PoseCheckMode = 'full_cpr'): string | null {
   if (!result.framingOk) return 'Move into the frame';
-  if (!result.earsVisible) return 'Show both ears in frame';
   if (!result.lookingDown) return 'Look down at the chest';
+  if (mode === 'framing_only') return null;
+
+  if (!result.earsVisible) return 'Show both ears in frame';
   if (result.elbowBent || !result.armsAreStraight) return 'Keep the elbow straight';
   if (!result.triangleFormed) return 'Stack shoulders over hands';
   return null;
@@ -51,8 +55,8 @@ export type PoseCueChip = {
   icon: string;
 };
 
-export function getPoseCueChips(result: CPRPostureResult): PoseCueChip[] {
-  return [
+export function getPoseCueChips(result: CPRPostureResult, mode: PoseCheckMode = 'full_cpr'): PoseCueChip[] {
+  const base: PoseCueChip[] = [
     {
       id: 'frame',
       label: result.framingOk ? 'In frame' : 'Move into frame',
@@ -60,16 +64,22 @@ export function getPoseCueChips(result: CPRPostureResult): PoseCueChip[] {
       icon: 'crop-free',
     },
     {
-      id: 'ears',
-      label: result.earsVisible ? 'Ears visible' : 'Show both ears',
-      ok: result.earsVisible,
-      icon: 'ear-hearing',
-    },
-    {
       id: 'look',
       label: result.lookingDown ? 'Looking down' : 'Look at chest',
       ok: result.lookingDown,
       icon: 'eye-outline',
+    },
+  ];
+
+  if (mode === 'framing_only') return base;
+
+  return [
+    ...base,
+    {
+      id: 'ears',
+      label: result.earsVisible ? 'Ears visible' : 'Show both ears',
+      ok: result.earsVisible,
+      icon: 'ear-hearing',
     },
     {
       id: 'elbow',

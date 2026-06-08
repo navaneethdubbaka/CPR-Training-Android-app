@@ -6,8 +6,10 @@ import { getColors } from '@/constants/colors';
 import { useTheme } from '@/contexts/ThemeContext';
 import { COMPRESSION_TARGET_RATE, COMPRESSION_TARGET_DEPTH, COMPRESSIONS_PER_SET, COMPRESSION_SETS_REQUIRED } from '@/constants/cpr-protocol';
 import type { CPRPostureResult } from '@/lib/pose-analysis';
+import type { PoseCheckMode } from '@/lib/cpr-pose-constants';
 import { pickPoseCue, pickSensorCue, speakCoachingCue } from '@/lib/coaching-cues';
 import { PoseCueChips } from '@/components/PoseCueChips';
+import { arduinoSerial } from '@/lib/arduino-serial';
 
 interface CompressionSet {
   count: number;
@@ -26,6 +28,9 @@ interface CompressionFeedbackProps {
   totalCount: number;
   postureResult?: CPRPostureResult | null;
   enablePoseVoiceCues?: boolean;
+  poseCheckMode?: PoseCheckMode;
+  stepId?: string;
+  currentForce?: number;
   sets?: CompressionSet[];
   currentSetIndex?: number;
   setsRequired?: number;
@@ -170,14 +175,21 @@ function GaugeBar({
 function CorrectionSidebar({
   currentRate,
   currentDepth,
+  currentForce,
   postureResult,
+  poseCheckMode,
+  stepId,
   Colors,
 }: {
   currentRate: number;
   currentDepth: number;
+  currentForce?: number;
   postureResult?: CPRPostureResult | null;
+  poseCheckMode?: PoseCheckMode;
+  stepId?: string;
   Colors: ReturnType<typeof getColors>;
 }) {
+  const showForce = arduinoSerial.isForceChannelAssigned();
   const rateOk = currentRate >= COMPRESSION_TARGET_RATE.min && currentRate <= COMPRESSION_TARGET_RATE.max;
   const depthOk = currentDepth >= COMPRESSION_TARGET_DEPTH.min && currentDepth <= COMPRESSION_TARGET_DEPTH.max;
   const rateColor = getRateColor(currentRate, Colors);
@@ -217,6 +229,22 @@ function CorrectionSidebar({
           unit="cm"
           Colors={Colors}
         />
+        {showForce && (
+          <>
+            <View style={[sidebarStyles.divider, { backgroundColor: Colors.border }]} />
+            <GaugeBar
+              value={currentForce ?? 0}
+              min={0}
+              max={5}
+              targetMin={arduinoSerial.getForceMinPeak()}
+              targetMax={5}
+              color={getDepthColor((currentForce ?? 0) >= arduinoSerial.getForceMinPeak() ? 5.5 : 3, Colors)}
+              label="Force"
+              unit="V"
+              Colors={Colors}
+            />
+          </>
+        )}
       </View>
 
       <View style={sidebarStyles.cueRow}>
@@ -264,7 +292,7 @@ function CorrectionSidebar({
             </View>
           </View>
         ) : (
-          <PoseCueChips result={postureResult} Colors={Colors} compact />
+          <PoseCueChips result={postureResult} Colors={Colors} compact checkMode={poseCheckMode} stepId={stepId} />
         )
       ) : null}
 
@@ -295,6 +323,9 @@ export function CompressionFeedback({
   count, currentRate, currentDepth, avgRate, avgDepth, goodCount, totalCount,
   postureResult,
   enablePoseVoiceCues = false,
+  poseCheckMode = 'full_cpr',
+  stepId,
+  currentForce = 0,
   sets, currentSetIndex = 0, setsRequired = COMPRESSION_SETS_REQUIRED, showSets = true,
 }: CompressionFeedbackProps) {
   const { theme } = useTheme();
@@ -339,7 +370,7 @@ export function CompressionFeedback({
     const sensorCue = pickSensorCue(currentRate, currentDepth);
     if (sensorCue) {
       lastCueTime.current = now;
-      speakCoachingCue(sensorCue);
+      speakCoachingCue(sensorCue, 'sensor', stepId);
       poseCueRef.current = null;
       poseCueSinceRef.current = null;
       return;
@@ -347,7 +378,7 @@ export function CompressionFeedback({
 
     if (!enablePoseVoiceCues || !postureResult) return;
 
-    const poseCue = pickPoseCue(postureResult);
+    const poseCue = pickPoseCue(postureResult, poseCheckMode);
     if (!poseCue) {
       poseCueRef.current = null;
       poseCueSinceRef.current = null;
@@ -362,10 +393,10 @@ export function CompressionFeedback({
 
     if (poseCueSinceRef.current && now - poseCueSinceRef.current >= 1500) {
       lastCueTime.current = now;
-      speakCoachingCue(poseCue);
+      speakCoachingCue(poseCue, 'pose', stepId);
       poseCueSinceRef.current = now;
     }
-  }, [currentRate, currentDepth, enablePoseVoiceCues, postureResult]);
+  }, [currentRate, currentDepth, enablePoseVoiceCues, postureResult, poseCheckMode, stepId]);
 
   const heartStyle = useAnimatedStyle(() => ({
     transform: [{ scale: pulseScale.value }],
@@ -396,7 +427,15 @@ export function CompressionFeedback({
         <SetIndicator sets={sets} currentSetIndex={currentSetIndex} setsRequired={setsRequired} Colors={Colors} />
       )}
 
-  <CorrectionSidebar currentRate={currentRate} currentDepth={currentDepth} postureResult={postureResult} Colors={Colors} />
+  <CorrectionSidebar
+    currentRate={currentRate}
+    currentDepth={currentDepth}
+    currentForce={currentForce}
+    postureResult={postureResult}
+    poseCheckMode={poseCheckMode}
+    stepId={stepId}
+    Colors={Colors}
+  />
 
       <View style={styles.qualityRow}>
         <MaterialCommunityIcons name="star" size={16} color={Colors.warning} />

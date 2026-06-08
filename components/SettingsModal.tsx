@@ -1368,24 +1368,29 @@ export function SettingsModal({ visible, onClose, connectionStatus, onConnect, o
                       const chIdx = parseInt(sensor.id.replace('channel_', ''), 10);
                       const isDepthChannel = chIdx === assignments['compressionDepth'];
                       const isBreathChannel = chIdx === assignments['breathPressure'];
+                      const isForceChannel = chIdx === assignments['compressionForce'];
                       return (
                         <ChannelCard
                           key={sensor.id}
                           channel={sensor}
                           isConnected={isConnected}
                           channelIndex={chIdx}
-                          offset={isDepthChannel ? ultrasonicOffset : isBreathChannel ? breathOffset : undefined}
+                          offset={isDepthChannel ? ultrasonicOffset : isBreathChannel ? breathOffset : isForceChannel ? arduinoSerial.getForceOffset() : undefined}
                           onOffsetChange={isDepthChannel
                             ? (v) => arduinoSerial.setUltrasonicOffset(v)
                             : isBreathChannel
                               ? (v) => arduinoSerial.setBreathOffset(v)
-                              : undefined
+                              : isForceChannel
+                                ? (v) => arduinoSerial.setForceOffset(v)
+                                : undefined
                           }
                           onCalibrate={isDepthChannel
                             ? () => arduinoSerial.calibrateUltrasonic()
                             : isBreathChannel
                               ? () => arduinoSerial.calibrateBreath()
-                              : undefined
+                              : isForceChannel
+                                ? () => arduinoSerial.calibrateForce()
+                                : undefined
                           }
                         />
                       );

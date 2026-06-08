@@ -1,11 +1,13 @@
 import { useEffect, useRef } from 'react';
 import type { CPRPostureResult } from '@/lib/pose-analysis';
+import type { PoseCheckMode } from '@/lib/cpr-pose-constants';
 import { pickPoseCue, speakCoachingCue } from '@/lib/coaching-cues';
 
-/** Debounced voice coaching for pose feedback (web + compressions sidebar). */
 export function usePoseVoiceCues(
   postureResult: CPRPostureResult | null | undefined,
   enabled: boolean,
+  checkMode: PoseCheckMode = 'full_cpr',
+  stepId?: string,
 ): void {
   const lastCueTime = useRef(0);
   const poseCueRef = useRef<string | null>(null);
@@ -17,7 +19,7 @@ export function usePoseVoiceCues(
     const now = Date.now();
     if (now - lastCueTime.current < 3000) return;
 
-    const poseCue = pickPoseCue(postureResult);
+    const poseCue = pickPoseCue(postureResult, checkMode);
     if (!poseCue) {
       poseCueRef.current = null;
       poseCueSinceRef.current = null;
@@ -32,8 +34,8 @@ export function usePoseVoiceCues(
 
     if (poseCueSinceRef.current && now - poseCueSinceRef.current >= 1500) {
       lastCueTime.current = now;
-      speakCoachingCue(poseCue);
+      speakCoachingCue(poseCue, 'pose', stepId);
       poseCueSinceRef.current = now;
     }
-  }, [enabled, postureResult]);
+  }, [enabled, postureResult, checkMode, stepId]);
 }

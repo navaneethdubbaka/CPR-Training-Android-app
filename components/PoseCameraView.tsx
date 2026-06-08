@@ -8,6 +8,7 @@ import { useTheme } from '@/contexts/ThemeContext';
 import { usePoseDetector, type PoseKeypoint, type CPRPostureResult } from '@/lib/pose-detection';
 import { EMPTY_POSTURE_RESULT } from '@/lib/pose-analysis';
 import { PoseSkeletonOverlay } from '@/components/PoseSkeletonOverlay';
+import type { PoseCheckMode } from '@/lib/cpr-pose-constants';
 
 export const CAMERA_DEVICE_KEY = 'cpr_camera_device_id';
 const GOOD_QUALITY_HOLD_MS = 1500;
@@ -20,6 +21,8 @@ interface Props {
   showOverlay?: boolean;
   overlayText?: string;
   isPaused?: boolean;
+  poseCheckMode?: PoseCheckMode;
+  currentStepId?: string;
 }
 
 export function PoseCameraView({
@@ -30,6 +33,8 @@ export function PoseCameraView({
   showOverlay,
   overlayText,
   isPaused = false,
+  poseCheckMode: _poseCheckMode = 'full_cpr',
+  currentStepId: _currentStepId,
 }: Props) {
   const { theme } = useTheme();
   const Colors = getColors(theme);

@@ -12,10 +12,16 @@ import { getColors } from '@/constants/colors';
 import { useTheme } from '@/contexts/ThemeContext';
 import { useWebPoseDetector } from '@/lib/pose-detection-web';
 import { EMPTY_POSTURE_RESULT, type CPRPostureResult, type PoseKeypoint } from '@/lib/pose-analysis';
-import { HAND_PLACEMENT_HOLD_MS, isLowAnglePostureGood } from '@/lib/cpr-pose-constants';
+import {
+  HAND_PLACEMENT_HOLD_MS,
+  isLowAnglePostureGood,
+  type PoseCheckMode,
+} from '@/lib/cpr-pose-constants';
 import { PoseSkeletonOverlay } from '@/components/PoseSkeletonOverlay';
 import { PoseCueChips } from '@/components/PoseCueChips';
 import { usePoseVoiceCues } from '@/lib/use-pose-voice-cues';
+import { captureVideoFrame } from '@/lib/capture-video-snapshot';
+import { sessionRecorder } from '@/lib/session-recorder';
 
 export const CAMERA_DEVICE_KEY = 'cpr_camera_device_id';
 
@@ -27,6 +33,8 @@ interface Props {
   showOverlay?: boolean;
   overlayText?: string;
   isPaused?: boolean;
+  poseCheckMode?: PoseCheckMode;
+  currentStepId?: string;
 }
 
 export function PoseCameraView({
@@ -37,6 +45,8 @@ export function PoseCameraView({
   showOverlay,
   overlayText,
   isPaused = false,
+  poseCheckMode = 'full_cpr',
+  currentStepId,
 }: Props) {
   const { theme } = useTheme();
   const Colors = getColors(theme);
@@ -123,24 +133,30 @@ export function PoseCameraView({
     onPoseQuality?.(result.quality);
     onPostureResult?.(result);
 
-    if (isPaused || !enableHandTracking) return;
+    if (currentStepId) {
+      const snap = captureVideoFrame(videoRef.current);
+      sessionRecorder.tryCaptureSnapshot(currentStepId, snap);
+    }
+
+    if (isPaused || !enableHandTracking || !onHandDetected) return;
+    if (poseCheckMode !== 'full_cpr') return;
 
     if (isLowAnglePostureGood(result)) {
       if (goodSinceRef.current === null) {
         goodSinceRef.current = Date.now();
       } else if (!handDetectedFiredRef.current && Date.now() - goodSinceRef.current >= HAND_PLACEMENT_HOLD_MS) {
         handDetectedFiredRef.current = true;
-        onHandDetected?.();
+        onHandDetected();
       }
     } else {
       goodSinceRef.current = null;
       handDetectedFiredRef.current = false;
     }
-  }, [onHandDetected, onPoseQuality, onPostureResult, isPaused, enableHandTracking]);
+  }, [onHandDetected, onPoseQuality, onPostureResult, isPaused, enableHandTracking, poseCheckMode, currentStepId]);
 
   const detectorEnabled = enableHandTracking && !isPaused;
   const { state: modelState, errorMessage: modelError, backend: tfBackend, retry: retryModel } =
-    useWebPoseDetector(videoRef, detectorEnabled, handlePostureResult, false);
+    useWebPoseDetector(videoRef, detectorEnabled, handlePostureResult, false, poseCheckMode);
 
   const handleLayout = useCallback((e: { nativeEvent: { layout: { width: number; height: number } } }) => {
     const { width, height } = e.nativeEvent.layout;
@@ -148,7 +164,13 @@ export function PoseCameraView({
   }, []);
 
   const modelReady = modelState === 'loaded';
-  usePoseVoiceCues(postureResult, enableHandTracking && modelReady && !isPaused);
+  usePoseVoiceCues(
+    postureResult,
+    enableHandTracking && modelReady && !isPaused,
+    poseCheckMode,
+    currentStepId,
+  );
+
   const qualityColor =
     postureResult.quality === 'good' ? '#00E676' :
     postureResult.quality === 'fair' ? '#FFD600' :
@@ -196,6 +218,7 @@ export function PoseCameraView({
             Colors={Colors}
             mirrorX
             displayMode="cpr_triangle"
+            poseCheckMode={poseCheckMode}
           />
         </View>
       )}
@@ -229,7 +252,13 @@ export function PoseCameraView({
             </View>
           ) : (
             <>
-              <PoseCueChips result={postureResult} Colors={Colors} compact />
+              <PoseCueChips
+                result={postureResult}
+                Colors={Colors}
+                compact
+                checkMode={poseCheckMode}
+                stepId={currentStepId}
+              />
               {postureResult.tips.length > 0 && (
                 <View style={styles.feedbackRow}>
                   <MaterialCommunityIcons name="lightbulb-on-outline" size={14} color="#FFD600" />
@@ -248,7 +277,7 @@ export function PoseCameraView({
           <View style={[styles.qualityDot, { backgroundColor: qualityColor }]} />
           <Text style={[styles.qualityText, { color: qualityColor }]}>
             {postureResult.quality === 'good' ? 'CORRECT POSTURE' :
-             postureResult.quality === 'fair' ? 'ADJUST ARMS' : 'FIX POSTURE'}
+             postureResult.quality === 'fair' ? 'ADJUST POSTURE' : 'FIX POSTURE'}
           </Text>
         </View>
       )}
