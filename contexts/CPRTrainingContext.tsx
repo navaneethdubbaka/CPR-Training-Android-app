@@ -581,8 +581,7 @@ export function CPRTrainingProvider({ children }: { children: ReactNode }) {
 
   const simulateCompression = useCallback(() => {
     if (arduinoSerial.getHardwareOnly()) return;
-    arduinoSerial.simulateCompression(true);
-    setTimeout(() => arduinoSerial.simulateCompression(false), 200);
+    arduinoSerial.simulateCompression();
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Heavy);
   }, []);
 

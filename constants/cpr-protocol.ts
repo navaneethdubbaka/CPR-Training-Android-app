@@ -8,7 +8,6 @@ export type CPRStepId =
   | 'aed_analyze'
   | 'aed_shock'
   | 'post_aed_compressions'
-  | 'post_shock'
   | 'complete';
 
 export interface CPRStep {
@@ -110,22 +109,14 @@ export const CPR_STEPS: CPRStep[] = [
   {
     id: 'post_aed_compressions',
     number: 9,
-    title: 'Resume Compressions',
-    instruction: 'Immediately resume chest compressions',
-    detail: 'After the shock, immediately resume CPR with full 30:2 cycles (compressions + rescue breaths) at 100–120 BPM with pose feedback.',
+    title: 'Post-Shock CPR',
+    instruction: 'Complete 2 full 30:2 cycles',
+    detail: 'After the shock, immediately resume CPR with 2 full cycles of 30 compressions and 2 rescue breaths at 100–120 BPM. Camera and pose feedback guide your technique.',
     autoAdvance: true,
     advanceCondition: 'post_shock_cycles_complete',
     requiresSensor: true,
-    sensorType: 'compression',
-  },
-  {
-    id: 'post_shock',
-    number: 10,
-    title: 'Continue CPR',
-    instruction: 'Maintain 30:2 ratio for 2 minutes',
-    detail: 'After the shock, immediately resume CPR starting with chest compressions. Continue 30:2 ratio for 2 minutes before AED re-analyzes.',
-    autoAdvance: false,
-    advanceCondition: 'manual_confirm',
+    requiresCamera: true,
+    sensorType: 'compression_and_breath',
   },
 ];
 
@@ -137,9 +128,8 @@ export const BREATHS_PER_CYCLE = 2;
 export const COMPRESSION_ACCURACY_GATE = 0.8;
 export const CYCLES_TRAINING = 5;
 export const CYCLES_TESTING = 1;
-export const POST_AED_COMPRESSIONS_REQUIRED = 2;
-export const POST_SHOCK_CYCLES_TRAINING = 1;
-export const POST_SHOCK_CYCLES_TESTING = 1;
+export const POST_SHOCK_CYCLES_TRAINING = 2;
+export const POST_SHOCK_CYCLES_TESTING = 2;
 export const COMPRESSION_SETS_REQUIRED = CYCLES_TRAINING;
 
 export const AED_STEP_IDS: CPRStepId[] = ['aed_pads', 'aed_analyze', 'aed_shock'];

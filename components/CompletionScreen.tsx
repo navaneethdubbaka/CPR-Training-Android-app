@@ -132,12 +132,11 @@ export function CompletionScreen({
         <AnimatedStat label="Quality" value={`${overallScore}%`} delay={800} color={scoreColor} surfaceColor={Colors.surface} mutedColor={Colors.textMuted} />
       </View>
 
-      {(coachingEvents.length > 0 || snapshots.length > 0) && (
-        <View style={[styles.logSection, { backgroundColor: Colors.surface, borderColor: Colors.border }]}>
+      <View style={[styles.logSection, { backgroundColor: Colors.surface, borderColor: Colors.border }]}>
           <Pressable style={styles.logHeader} onPress={() => setLogExpanded(v => !v)}>
             <MaterialCommunityIcons name="clipboard-text-outline" size={18} color={Colors.info} />
             <Text style={[styles.logTitle, { color: Colors.text }]}>
-              Session Log ({coachingEvents.length} alerts, {snapshots.length} snapshots)
+              Session Log — {coachingEvents.length} alert{coachingEvents.length !== 1 ? 's' : ''}, {snapshots.length} snapshot{snapshots.length !== 1 ? 's' : ''}
             </Text>
             <MaterialCommunityIcons
               name={logExpanded ? 'chevron-up' : 'chevron-down'}
@@ -148,6 +147,11 @@ export function CompletionScreen({
 
           {logExpanded && (
             <View style={styles.logBody}>
+              {coachingEvents.length === 0 && snapshots.length === 0 && (
+                <Text style={[styles.emptyLog, { color: Colors.textMuted }]}>
+                  No coaching alerts or snapshots were captured this session.
+                </Text>
+              )}
               {snapshots.length > 0 && (
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.thumbStrip}>
                   {snapshots.map(snap => (
@@ -173,9 +177,8 @@ export function CompletionScreen({
             </View>
           )}
         </View>
-      )}
 
-      {Platform.OS === 'web' && (coachingEvents.length > 0 || snapshots.length > 0) && (
+      {Platform.OS === 'web' && (
         <Pressable
           style={({ pressed }) => [styles.downloadBtn, { backgroundColor: Colors.surface, borderColor: Colors.border }, pressed && { opacity: 0.8 }]}
           onPress={handleDownloadReport}
@@ -285,6 +288,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingBottom: 14,
     gap: 8,
+  },
+  emptyLog: {
+    fontSize: 12,
+    textAlign: 'center',
+    paddingVertical: 8,
   },
   thumbStrip: {
     marginBottom: 8,

@@ -38,7 +38,6 @@ const STEP_ICONS: Record<string, keyof typeof MaterialCommunityIcons.glyphMap> =
   aed_analyze: 'monitor-shimmer',
   aed_shock: 'flash-alert',
   post_aed_compressions: 'heart-pulse',
-  post_shock: 'restart',
 };
 
 export function InstructionPanel({

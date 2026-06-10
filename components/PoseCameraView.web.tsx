@@ -135,6 +135,7 @@ export function PoseCameraView({
 
     if (currentStepId) {
       const snap = captureVideoFrame(videoRef.current);
+      sessionRecorder.tryCaptureGuaranteedSnapshot(currentStepId, snap);
       sessionRecorder.tryCaptureSnapshot(currentStepId, snap);
     }
 

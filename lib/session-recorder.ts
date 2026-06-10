@@ -25,6 +25,7 @@ class SessionRecorder {
   private snapshotSchedule: number[] = [];
   private sessionStart = 0;
   private nextSnapshotIdx = 0;
+  private guaranteedSnapshotTaken = false;
 
   reset(): void {
     this.events = [];
@@ -33,6 +34,7 @@ class SessionRecorder {
     this.snapshotSchedule = [];
     this.sessionStart = 0;
     this.nextSnapshotIdx = 0;
+    this.guaranteedSnapshotTaken = false;
     eventCounter = 0;
     snapshotCounter = 0;
   }
@@ -83,6 +85,21 @@ class SessionRecorder {
 
   clearChipFailure(chipId: string, stepId: string): void {
     this.loggedChipFailures.delete(`${stepId}:${chipId}`);
+  }
+
+  tryCaptureGuaranteedSnapshot(stepId: string, dataUrl: string | null): void {
+    if (!dataUrl || this.guaranteedSnapshotTaken) return;
+    const cameraSteps = new Set(['scene_safety', 'check_responsiveness', 'call_911', 'hand_placement', 'compressions', 'post_aed_compressions']);
+    if (!cameraSteps.has(stepId)) return;
+
+    snapshotCounter += 1;
+    this.snapshots.push({
+      id: `snap-${snapshotCounter}`,
+      timestamp: Date.now(),
+      stepId,
+      dataUrl,
+    });
+    this.guaranteedSnapshotTaken = true;
   }
 
   tryCaptureSnapshot(stepId: string, dataUrl: string | null): void {

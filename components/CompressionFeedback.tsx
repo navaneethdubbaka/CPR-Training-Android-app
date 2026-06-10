@@ -1,4 +1,5 @@
 import React, { useEffect, useRef } from 'react';
+import { sessionRecorder } from '@/lib/session-recorder';
 import { View, Text, StyleSheet } from 'react-native';
 import Animated, { useSharedValue, useAnimatedStyle, withTiming, withRepeat, withSequence } from 'react-native-reanimated';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -194,6 +195,26 @@ function CorrectionSidebar({
   const depthOk = currentDepth >= COMPRESSION_TARGET_DEPTH.min && currentDepth <= COMPRESSION_TARGET_DEPTH.max;
   const rateColor = getRateColor(currentRate, Colors);
   const depthColor = getDepthColor(currentDepth, Colors);
+  const prevRateOkRef = useRef<boolean | null>(null);
+  const prevDepthOkRef = useRef<boolean | null>(null);
+
+  useEffect(() => {
+    if (!stepId || currentRate === 0) return;
+    const rateLabel = getRateLabel(currentRate);
+    if (prevRateOkRef.current === true && !rateOk && rateLabel !== 'Waiting...') {
+      sessionRecorder.logCoachingEvent(stepId, 'sensor', rateLabel);
+    }
+    prevRateOkRef.current = rateOk;
+  }, [currentRate, rateOk, stepId]);
+
+  useEffect(() => {
+    if (!stepId || currentDepth === 0) return;
+    const depthLabel = getDepthLabel(currentDepth);
+    if (prevDepthOkRef.current === true && !depthOk && depthLabel !== 'Waiting...') {
+      sessionRecorder.logCoachingEvent(stepId, 'sensor', depthLabel);
+    }
+    prevDepthOkRef.current = depthOk;
+  }, [currentDepth, depthOk, stepId]);
 
   const positionOk = rateOk && depthOk;
   const postureOk = postureResult?.quality === 'good';

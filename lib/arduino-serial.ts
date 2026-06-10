@@ -191,7 +191,7 @@ const DEFAULT_ASSIGNMENTS: SensorAssignments = {
   leftShoulder: 0,
   rightShoulder: 1,
   compressionDepth: 5,
-  compressionForce: 6,
+  compressionForce: null,
   breathPressure: 6,
   aedPadUpper: 2,
   aedPadLower: 3,
@@ -258,8 +258,10 @@ class ArduinoSerialManager {
   private offsetListeners: Set<(ultrasonicOffset: number, breathOffset: number) => void> = new Set();
 
   private simulationInterval: ReturnType<typeof setInterval> | null = null;
+  private simCompressionWaveTimer: ReturnType<typeof setTimeout> | null = null;
   private simState = {
-    compressing: false,
+    simDepth: 0,
+    simForce: 0,
     compressionCount: 0,
     breathing: false,
     breathCount: 0,
@@ -730,8 +732,17 @@ class ArduinoSerialManager {
     this.peakPressure = 0;
   }
 
+  isDedicatedForceChannel(): boolean {
+    const forceIdx = this.assignments.compressionForce;
+    if (forceIdx === null) return false;
+    return (
+      forceIdx !== this.assignments.breathPressure &&
+      forceIdx !== this.assignments.compressionDepth
+    );
+  }
+
   isForceChannelAssigned(): boolean {
-    return this.assignments.compressionForce !== null;
+    return this.isDedicatedForceChannel();
   }
 
   getForceOffset(): number {
@@ -765,9 +776,9 @@ class ArduinoSerialManager {
     forcePeak: number;
   } {
     const depthAssigned = this.assignments.compressionDepth !== null;
-    const forceAssigned = this.assignments.compressionForce !== null;
+    const forceDedicated = this.isDedicatedForceChannel();
 
-    if (!depthAssigned && forceAssigned) {
+    if (!depthAssigned && forceDedicated) {
       return this.detectForceOnlyCycle(forceVal);
     }
 
@@ -777,7 +788,7 @@ class ArduinoSerialManager {
     let savedDepthPeak = 0;
     let savedForcePeak = 0;
 
-    if (forceAssigned && forceVal > this.peakForce) {
+    if (forceDedicated && forceVal > this.peakForce) {
       this.peakForce = forceVal;
     }
 
@@ -813,7 +824,7 @@ class ArduinoSerialManager {
           savedDepthPeak = this.peakDepth;
           savedForcePeak = this.peakForce;
           detected = true;
-          if (forceAssigned) {
+          if (forceDedicated) {
             detected = savedForcePeak >= this.forceMinPeak;
           }
 
@@ -1412,16 +1423,26 @@ class ArduinoSerialManager {
     if (this.simulationInterval) return;
 
     this.simulationInterval = setInterval(() => {
+      const depthIdx = this.assignments.compressionDepth ?? 5;
+      const forceIdx = this.assignments.compressionForce;
+      const breathIdx = this.assignments.breathPressure ?? 6;
       const rawChannels: number[] = [
         this.simState.shoulderLeft ? 1 : 0,
         this.simState.shoulderRight ? 1 : 0,
         this.simState.aedUpper ? 1 : 0,
         this.simState.aedLower ? 1 : 0,
         this.simState.neckTilt ? 1 : 0,
-        this.simState.compressing ? 4.5 + Math.random() * 2 : 0,
-        this.simState.breathing ? 2.5 + Math.random() * 1.5 : 0,
-        0, 0, 0, 0, 0,
+        0, 0, 0, 0, 0, 0, 0,
       ];
+      if (depthIdx >= 0 && depthIdx < rawChannels.length) {
+        rawChannels[depthIdx] = this.simState.simDepth;
+      }
+      if (this.simState.breathing && breathIdx >= 0 && breathIdx < rawChannels.length) {
+        rawChannels[breathIdx] = 2.5 + Math.random() * 1.5;
+      }
+      if (this.isDedicatedForceChannel() && forceIdx !== null && forceIdx >= 0 && forceIdx < rawChannels.length) {
+        rawChannels[forceIdx] = this.simState.simForce;
+      }
       this.updateChannelsFromRaw(rawChannels);
       const sensorData = this.transformRawToSensorData(rawChannels);
       this.emit(sensorData);
@@ -1450,11 +1471,108 @@ class ArduinoSerialManager {
     }
   }
 
-  simulateCompression(active: boolean) {
-    this.simState.compressing = active;
-    if (active) {
-      this.simState.compressionCount++;
+  simulateCompression(_active?: boolean) {
+    if (this.mode !== 'simulation') return;
+    if (this.simCompressionWaveTimer) return;
+
+    const cycleCountBefore = this.cycleCompressionCount;
+    const wave = [0, 3, 5.5, 6.5, 6.5, 5, 2, 0];
+    const forceWave = [0, 0.8, 1.5, 2.2, 2.2, 1.2, 0.4, 0];
+    let step = 0;
+
+    const runStep = () => {
+      if (step >= wave.length) {
+        this.simCompressionWaveTimer = null;
+        this.simState.simDepth = 0;
+        this.simState.simForce = 0;
+        if (this.cycleCompressionCount === cycleCountBefore) {
+          this.injectSimulatedCompression();
+        }
+        return;
+      }
+      this.simState.simDepth = wave[step];
+      if (this.isDedicatedForceChannel()) {
+        this.simState.simForce = forceWave[step] ?? 0;
+      }
+      step += 1;
+      this.simCompressionWaveTimer = setTimeout(runStep, 80);
+    };
+
+    this.simState.compressionCount++;
+    runStep();
+  }
+
+  private injectSimulatedCompression(): void {
+    if (this.mode !== 'simulation' || this.phase !== 'COMPRESSION') return;
+
+    const now = Date.now();
+    if (this.lastCompressionTime > 0) {
+      const interval = now - this.lastCompressionTime;
+      if (interval > 300 && interval < 2000) {
+        this.compressionRate = 60000 / interval;
+      }
     }
+    this.lastCompressionTime = now;
+
+    this.cycleCompressionCount++;
+    let emitCycleCompressionCount = this.cycleCompressionCount;
+    let emitPhase: 'COMPRESSION' | 'BREATH' = 'COMPRESSION';
+
+    if (this.cycleCompressionCount >= COMPRESSIONS_PER_CYCLE) {
+      emitCycleCompressionCount = COMPRESSIONS_PER_CYCLE;
+      emitPhase = 'BREATH';
+      this.phase = 'BREATH';
+      this.cycleCompressionCount = 0;
+      this.breathState = 'IDLE';
+      this.peakPressure = 0;
+    }
+
+    this.compressionState = 'IDLE';
+    this.forceCompressionState = 'IDLE';
+    this.peakDepth = 0;
+    this.peakForce = 0;
+    this.lastDepth = 0;
+    this.lastForce = 0;
+
+    this.emit({
+      touchSensors: {
+        leftShoulder: this.simState.shoulderLeft,
+        rightShoulder: this.simState.shoulderRight,
+        aedPadUpper: this.simState.aedUpper,
+        aedPadLower: this.simState.aedLower,
+        neckTilt: this.simState.neckTilt,
+      },
+      compressionDepth: 0,
+      compressionForce: 0,
+      compressionRate: this.compressionRate || 110,
+      compressionDetected: true,
+      compressionPeak: 5.5,
+      compressionForcePeak: this.isDedicatedForceChannel() ? 2.2 : undefined,
+      breathDetected: false,
+      breathCount: this.cycleBreathCount,
+      cycleCompressionCount: emitCycleCompressionCount,
+      airPressure: 0,
+      phase: emitPhase,
+      timestamp: Date.now(),
+    });
+  }
+
+  private buildSimRawChannels(): number[] {
+    const depthIdx = this.assignments.compressionDepth ?? 5;
+    const breathIdx = this.assignments.breathPressure ?? 6;
+    const forceIdx = this.assignments.compressionForce;
+    const rawChannels: number[] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+    if (this.simState.shoulderLeft) rawChannels[0] = 1;
+    if (this.simState.shoulderRight) rawChannels[1] = 1;
+    if (this.simState.aedUpper) rawChannels[2] = 1;
+    if (this.simState.aedLower) rawChannels[3] = 1;
+    if (this.simState.neckTilt) rawChannels[4] = 1;
+    if (this.simState.breathing && breathIdx >= 0) rawChannels[breathIdx] = 0.5;
+    if (depthIdx >= 0) rawChannels[depthIdx] = this.simState.simDepth;
+    if (this.isDedicatedForceChannel() && forceIdx !== null && forceIdx >= 0) {
+      rawChannels[forceIdx] = this.simState.simForce;
+    }
+    return rawChannels;
   }
 
   simulateBreath(active: boolean) {
@@ -1469,8 +1587,13 @@ class ArduinoSerialManager {
   }
 
   resetSimState() {
+    if (this.simCompressionWaveTimer) {
+      clearTimeout(this.simCompressionWaveTimer);
+      this.simCompressionWaveTimer = null;
+    }
     this.simState = {
-      compressing: false,
+      simDepth: 0,
+      simForce: 0,
       compressionCount: 0,
       breathing: false,
       breathCount: 0,

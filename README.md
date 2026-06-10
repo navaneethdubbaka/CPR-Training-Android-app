@@ -138,7 +138,7 @@ For trying **pose + skeleton**, **Testing** or **Training** through to **step 4 
 | 1–3 (scene safety → call for help) | On | **Frame + look down only** (head & shoulders in box) |
 | 4–5 (hand placement → compressions) | On | **Full CPR pose** (ears, elbows, triangle, wrists) |
 | 6–8 (AED pads → shock) | **Off** | Paused — focus on AED panel |
-| 9–10 (post-shock compressions) | On | **Full CPR pose** + compression/breath feedback |
+| 9 (post-shock CPR) | On | **Full CPR pose** + 2×30:2 cycles, then Completion |
 
 You **cannot continue** until framing requirements are met for **~1 second** (skipped on AED steps).
 
@@ -158,17 +158,24 @@ Place the **phone or tablet on the ground at ~45°**, **front camera** facing th
 
 Hold **full good posture** for **1.5 seconds** to auto-verify (ears, look down, straight elbows, triangle). Or use **Verify Hands** in simulation mode.
 
-### Post-shock cycles (step 9)
+### Post-shock CPR (step 9 — final step)
 
-After AED shock, resume **30:2 compressions + rescue breaths** with the same pose and feedback as step 5. Default is **1 full cycle** (configurable in `constants/cpr-protocol.ts` via `POST_SHOCK_CYCLES_TRAINING`).
+After AED shock, complete **2 full 30:2 cycles** (compressions + rescue breaths) with the same pose and feedback as step 5. The app then goes straight to the **Completion screen** (no separate step 10). Cycle count is configurable via `POST_SHOCK_CYCLES_TRAINING` in `constants/cpr-protocol.ts`.
 
 ### Session log & snapshots (web)
 
-Coaching alerts (pose + sensor) are recorded during training. Up to **4 random video snapshots** are captured from the live feed. On the **completion screen**, expand **Session Log** and use **Download Report (JSON)** to export events and embedded snapshot images.
+Coaching alerts (pose + sensor) are recorded during training. **One snapshot** is captured on the first camera step; up to **4 additional random snapshots** may be taken later. On the **completion screen**, the Session Log header always shows alert/snapshot counts — expand it and use **Download Report (JSON)** to export.
 
 ### Force sensors (optional hardware)
 
-Assign **Compression Force** to an analog channel in Settings. Calibrate **offset** (zero at rest) and set **min peak threshold** in the monitor tab. When depth is unavailable, compressions are detected from force peaks; when both depth and force are assigned, both must pass thresholds.
+Assign **Compression Force** to a **dedicated** analog channel (not shared with breath pressure) in Settings. Calibrate **offset** at rest. When depth is unavailable, compressions are detected from force peaks; when both are on separate channels, both peaks must pass thresholds.
+
+### Simulation mode — compressions not counting?
+
+1. Settings → **Hardware Only Mode** → **OFF**
+2. Start training (simulation connects automatically)
+3. On step 5 or 9, tap **Push Down** in the simulation panel — each tap runs a full press/release waveform
+4. After **30** compressions, the breath panel appears; tap **Give Breath** twice per cycle
 
 ### Limitations (share with trainees)
 
@@ -206,6 +213,7 @@ The web client talks to `http://localhost:5000` (WebSocket `/ws/arduino`) when u
 | **Model unavailable** | Check internet; click **Retry model load**; allow `cdn.jsdelivr.net` and Google storage if on a restricted network |
 | Black camera / permission denied | Browser site settings → allow Camera for localhost; click **Allow camera & retry** |
 | Cannot start training | Settings → **Hardware Only Mode** → OFF |
+| Push Down does not count compressions | Hardware Only OFF; ensure simulation is connected; tap Push Down once per compression (wait ~0.5s between taps) |
 | No skeleton, but camera works | Wait for model to finish loading; improve lighting; show shoulders, elbows, wrists |
 | Port 8081 in use | Stop other Expo/Node processes or run `npx expo start --web --port 8082` |
 

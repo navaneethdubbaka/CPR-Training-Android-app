@@ -45,7 +45,6 @@ const FULL_CPR_STEPS = new Set([
   'hand_placement',
   'compressions',
   'post_aed_compressions',
-  'post_shock',
 ]);
 
 export function getPoseCheckModeForStep(stepId: string): PoseCheckMode | null {
