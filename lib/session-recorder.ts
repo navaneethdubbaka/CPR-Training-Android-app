@@ -43,7 +43,7 @@ class SessionRecorder {
     this.reset();
     this.sessionStart = Date.now();
     const durationMs = 8 * 60 * 1000;
-    const count = 4;
+    const count = 6;
     const minGap = 30_000;
     const times: number[] = [];
     let last = this.sessionStart + 15_000;
@@ -89,8 +89,8 @@ class SessionRecorder {
 
   tryCaptureGuaranteedSnapshot(stepId: string, dataUrl: string | null): void {
     if (!dataUrl || this.guaranteedSnapshotTaken) return;
-    const cameraSteps = new Set(['scene_safety', 'check_responsiveness', 'call_911', 'hand_placement', 'compressions', 'post_aed_compressions']);
-    if (!cameraSteps.has(stepId)) return;
+    const cprCameraSteps = new Set(['hand_placement', 'compressions', 'post_aed_compressions']);
+    if (!cprCameraSteps.has(stepId)) return;
 
     snapshotCounter += 1;
     this.snapshots.push({
@@ -129,6 +129,7 @@ class SessionRecorder {
     return JSON.stringify({
       exportedAt: new Date().toISOString(),
       metrics,
+      sessionAnalytics: metrics.sessionAnalytics ?? null,
       coachingEvents: this.events,
       snapshots: this.snapshots.map(s => ({
         id: s.id,

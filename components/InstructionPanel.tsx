@@ -24,6 +24,7 @@ interface InstructionPanelProps {
   cycleBreathCount?: number;
   completedCycles?: number;
   totalCycles?: number;
+  showCycleTracker?: boolean;
   framingBlocked?: boolean;
   framingMessage?: string;
 }
@@ -56,6 +57,7 @@ export function InstructionPanel({
   cycleBreathCount = 0,
   completedCycles = 0,
   totalCycles = 5,
+  showCycleTracker = false,
   framingBlocked = false,
   framingMessage = 'Adjust camera until your head, shoulders, and hands are inside the box',
 }: InstructionPanelProps) {
@@ -88,7 +90,6 @@ export function InstructionPanel({
   const isSceneSafety = step.id === 'scene_safety';
   const isCheckResponsiveness = step.id === 'check_responsiveness';
   const isCall911 = step.id === 'call_911';
-  const isCompressions = step.id === 'compressions';
   const useVoiceForStep = isSceneSafety || isCheckResponsiveness || isCall911;
 
   const checkResponsivenessAllDone = isCheckResponsiveness && (voiceCompleted ?? false) && (shoulderTapDone ?? false);
@@ -214,7 +215,7 @@ export function InstructionPanel({
         />
       )}
 
-      {isCompressions && (
+      {showCycleTracker && (
         <View style={[styles.cycleTracker, { backgroundColor: Colors.surfaceLight }]}>
           <View style={styles.cycleHeader}>
             <MaterialCommunityIcons
@@ -229,7 +230,7 @@ export function InstructionPanel({
             </Text>
             <View style={[styles.cycleBadge, { backgroundColor: `${Colors.feedbackGood}20` }]}>
               <Text style={[styles.cycleBadgeText, { color: Colors.feedbackGood }]}>
-                Cycle {completedCycles + 1}/{totalCycles}
+                Cycle {completedCycles}/{totalCycles}
               </Text>
             </View>
           </View>

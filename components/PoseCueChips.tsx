@@ -6,6 +6,7 @@ import type { CPRPostureResult } from '@/lib/pose-analysis';
 import type { PoseCheckMode } from '@/lib/cpr-pose-constants';
 import { getPoseCueChips } from '@/lib/coaching-cues';
 import { sessionRecorder } from '@/lib/session-recorder';
+import { sessionAnalytics } from '@/lib/session-analytics';
 
 interface Props {
   result: CPRPostureResult;
@@ -21,6 +22,7 @@ export function PoseCueChips({ result, Colors, compact = false, checkMode = 'ful
 
   useEffect(() => {
     if (!stepId) return;
+    sessionAnalytics.recordPoseFrame(stepId, result, checkMode);
     for (const chip of chips) {
       const wasOk = prevOkRef.current[chip.id];
       if (wasOk === false && chip.ok) {
@@ -31,7 +33,7 @@ export function PoseCueChips({ result, Colors, compact = false, checkMode = 'ful
       }
       prevOkRef.current[chip.id] = chip.ok;
     }
-  }, [chips, stepId]);
+  }, [chips, stepId, result, checkMode]);
 
   return (
     <View style={[styles.row, compact && styles.rowCompact]}>

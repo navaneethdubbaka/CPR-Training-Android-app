@@ -6,24 +6,20 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getColors } from '@/constants/colors';
 import { useTheme } from '@/contexts/ThemeContext';
 import type { CoachingEvent, SessionSnapshot } from '@/lib/session-recorder';
+import type { SessionAnalyticsSummary } from '@/lib/session-analytics';
 import { sessionRecorder } from '@/lib/session-recorder';
+import { COMPRESS_TO_BREATH_TARGET_MS } from '@/constants/cpr-protocol';
 
 interface CompletionScreenProps {
-  elapsedTime: number;
-  compressionCount: number;
-  goodCompressions: number;
-  avgRate: number;
-  avgDepth: number;
-  breathCount: number;
-  goodBreaths: number;
   overallScore: number;
+  sessionAnalytics: SessionAnalyticsSummary;
   coachingEvents?: CoachingEvent[];
   snapshots?: SessionSnapshot[];
   onRestart: () => void;
 }
 
-function AnimatedStat({ label, value, unit, delay, color, surfaceColor, mutedColor }: {
-  label: string; value: string; unit?: string; delay: number; color: string;
+function AnimatedStat({ label, value, unit, sublabel, delay, color, surfaceColor, mutedColor }: {
+  label: string; value: string; unit?: string; sublabel?: string; delay: number; color: string;
   surfaceColor: string; mutedColor: string;
 }) {
   const opacity = useSharedValue(0);
@@ -46,14 +42,23 @@ function AnimatedStat({ label, value, unit, delay, color, surfaceColor, mutedCol
         <Text style={[styles.statValue, { color }]}>{value}</Text>
         {unit ? <Text style={[styles.statUnit, { color: mutedColor }]}>{unit}</Text> : null}
       </View>
+      {sublabel ? (
+        <Text style={[styles.statSublabel, { color: mutedColor }]}>{sublabel}</Text>
+      ) : null}
     </Animated.View>
   );
 }
 
+function formatGapSeconds(ms: number): string {
+  if (ms <= 0) return '--';
+  return (ms / 1000).toFixed(1);
+}
+
 export function CompletionScreen({
-  elapsedTime, compressionCount, goodCompressions,
-  avgRate, avgDepth, breathCount, goodBreaths,
-  overallScore, coachingEvents = [], snapshots = [],
+  overallScore,
+  sessionAnalytics,
+  coachingEvents = [],
+  snapshots = [],
   onRestart,
 }: CompletionScreenProps) {
   const insets = useSafeAreaInsets();
@@ -71,13 +76,6 @@ export function CompletionScreen({
     transform: [{ scale: scoreScale.value }],
   }));
 
-  const formatTime = (ms: number) => {
-    const totalSec = Math.floor(ms / 1000);
-    const min = Math.floor(totalSec / 60);
-    const sec = totalSec % 60;
-    return `${min}:${sec.toString().padStart(2, '0')}`;
-  };
-
   const formatEventTime = (ts: number) => {
     const d = new Date(ts);
     return `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}:${d.getSeconds().toString().padStart(2, '0')}`;
@@ -89,17 +87,15 @@ export function CompletionScreen({
                      overallScore >= 80 ? 'Good' :
                      overallScore >= 60 ? 'Needs Practice' : 'Keep Trying';
 
+  const maxGapMs = sessionAnalytics.maxCompressToBreathGapMs;
+  const gapOk = maxGapMs === 0 || maxGapMs <= COMPRESS_TO_BREATH_TARGET_MS;
+  const gapColor = maxGapMs === 0 ? Colors.textMuted : gapOk ? Colors.feedbackGood : Colors.feedbackBad;
+
   const handleDownloadReport = () => {
     if (Platform.OS !== 'web' || typeof document === 'undefined') return;
     const report = sessionRecorder.exportReport({
-      elapsedTime,
-      compressionCount,
-      goodCompressions,
-      avgRate,
-      avgDepth,
-      breathCount,
-      goodBreaths,
       overallScore,
+      sessionAnalytics,
     });
     const blob = new Blob([report], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -122,14 +118,64 @@ export function CompletionScreen({
 
       <Text style={[styles.grade, { color: scoreColor }]}>{scoreGrade}</Text>
       <Text style={[styles.subtitle, { color: Colors.textSecondary }]}>Training Session Complete</Text>
+      <Text style={[styles.scoreCaption, { color: Colors.textMuted }]}>
+        Quality based on compression depth, rate, and force
+      </Text>
 
       <View style={styles.statsGrid}>
-        <AnimatedStat label="Duration" value={formatTime(elapsedTime)} delay={300} color={Colors.info} surfaceColor={Colors.surface} mutedColor={Colors.textMuted} />
-        <AnimatedStat label="Compressions" value={`${goodCompressions}/${compressionCount}`} delay={400} color={Colors.accent} surfaceColor={Colors.surface} mutedColor={Colors.textMuted} />
-        <AnimatedStat label="Avg Rate" value={avgRate > 0 ? Math.round(avgRate).toString() : '--'} unit="BPM" delay={500} color={Colors.feedbackGood} surfaceColor={Colors.surface} mutedColor={Colors.textMuted} />
-        <AnimatedStat label="Avg Depth" value={avgDepth > 0 ? avgDepth.toFixed(1) : '--'} unit="cm" delay={600} color={Colors.feedbackGood} surfaceColor={Colors.surface} mutedColor={Colors.textMuted} />
-        <AnimatedStat label="Breaths" value={`${goodBreaths}/${breathCount}`} delay={700} color={Colors.info} surfaceColor={Colors.surface} mutedColor={Colors.textMuted} />
-        <AnimatedStat label="Quality" value={`${overallScore}%`} delay={800} color={scoreColor} surfaceColor={Colors.surface} mutedColor={Colors.textMuted} />
+        <AnimatedStat
+          label="Elbow folds"
+          value={String(sessionAnalytics.elbowFoldCount)}
+          delay={300}
+          color={sessionAnalytics.elbowFoldCount === 0 ? Colors.feedbackGood : Colors.feedbackOk}
+          surfaceColor={Colors.surface}
+          mutedColor={Colors.textMuted}
+        />
+        <AnimatedStat
+          label="Interruptions"
+          value={String(sessionAnalytics.compressionInterruptions)}
+          sublabel="≥10s between compressions"
+          delay={400}
+          color={sessionAnalytics.compressionInterruptions === 0 ? Colors.feedbackGood : Colors.feedbackBad}
+          surfaceColor={Colors.surface}
+          mutedColor={Colors.textMuted}
+        />
+        <AnimatedStat
+          label="Max compress→breath"
+          value={formatGapSeconds(maxGapMs)}
+          unit="s"
+          sublabel={`Target ≤ ${COMPRESS_TO_BREATH_TARGET_MS / 1000}s`}
+          delay={500}
+          color={gapColor}
+          surfaceColor={Colors.surface}
+          mutedColor={Colors.textMuted}
+        />
+        <AnimatedStat
+          label="Didn't look down"
+          value={String(sessionAnalytics.lookDownFailCount)}
+          delay={600}
+          color={sessionAnalytics.lookDownFailCount === 0 ? Colors.feedbackGood : Colors.feedbackOk}
+          surfaceColor={Colors.surface}
+          mutedColor={Colors.textMuted}
+        />
+        <AnimatedStat
+          label="Avg rate"
+          value={sessionAnalytics.avgRate > 0 ? Math.round(sessionAnalytics.avgRate).toString() : '--'}
+          unit="BPM"
+          delay={700}
+          color={Colors.feedbackGood}
+          surfaceColor={Colors.surface}
+          mutedColor={Colors.textMuted}
+        />
+        <AnimatedStat
+          label="Avg depth"
+          value={sessionAnalytics.avgDepth > 0 ? sessionAnalytics.avgDepth.toFixed(1) : '--'}
+          unit="cm"
+          delay={800}
+          color={Colors.feedbackGood}
+          surfaceColor={Colors.surface}
+          mutedColor={Colors.textMuted}
+        />
       </View>
 
       <View style={[styles.logSection, { backgroundColor: Colors.surface, borderColor: Colors.border }]}>
@@ -166,14 +212,16 @@ export function CompletionScreen({
                   ))}
                 </ScrollView>
               )}
-              {coachingEvents.slice(-8).map(evt => (
-                <View key={evt.id} style={styles.logRow}>
-                  <Text style={[styles.logTime, { color: Colors.textMuted }]}>{formatEventTime(evt.timestamp)}</Text>
-                  <Text style={[styles.logMsg, { color: Colors.textSecondary }]} numberOfLines={2}>
-                    [{evt.source}] {evt.message}
-                  </Text>
-                </View>
-              ))}
+              <ScrollView style={styles.logScroll} nestedScrollEnabled>
+                {coachingEvents.map(evt => (
+                  <View key={evt.id} style={styles.logRow}>
+                    <Text style={[styles.logTime, { color: Colors.textMuted }]}>{formatEventTime(evt.timestamp)}</Text>
+                    <Text style={[styles.logMsg, { color: Colors.textSecondary }]} numberOfLines={2}>
+                      [{evt.source}] {evt.message}
+                    </Text>
+                  </View>
+                ))}
+              </ScrollView>
             </View>
           )}
         </View>
@@ -233,6 +281,11 @@ const styles = StyleSheet.create({
   subtitle: {
     fontSize: 14,
   },
+  scoreCaption: {
+    fontSize: 12,
+    textAlign: 'center',
+    marginTop: -8,
+  },
   statsGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -246,12 +299,14 @@ const styles = StyleSheet.create({
     width: 140,
     alignItems: 'center',
     gap: 4,
+    minHeight: 88,
   },
   statLabel: {
     fontSize: 11,
     fontWeight: '600',
     textTransform: 'uppercase',
     letterSpacing: 0.5,
+    textAlign: 'center',
   },
   statValueRow: {
     flexDirection: 'row',
@@ -265,6 +320,11 @@ const styles = StyleSheet.create({
   statUnit: {
     fontSize: 12,
     fontWeight: '600',
+  },
+  statSublabel: {
+    fontSize: 9,
+    textAlign: 'center',
+    marginTop: 2,
   },
   logSection: {
     width: '100%',
@@ -310,10 +370,14 @@ const styles = StyleSheet.create({
   thumbLabel: {
     fontSize: 9,
   },
+  logScroll: {
+    maxHeight: 220,
+  },
   logRow: {
     flexDirection: 'row',
     gap: 8,
     alignItems: 'flex-start',
+    marginBottom: 4,
   },
   logTime: {
     fontSize: 10,

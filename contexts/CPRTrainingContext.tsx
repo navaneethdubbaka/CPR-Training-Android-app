@@ -7,6 +7,7 @@ import {
 } from '@/constants/cpr-protocol';
 import { arduinoSerial, type SensorData, type ArduinoConnectionStatus, type ArduinoConnectionMode, DEFAULT_SENSOR_DATA } from '@/lib/arduino-serial';
 import { sessionRecorder, type CoachingEvent, type SessionSnapshot } from '@/lib/session-recorder';
+import { sessionAnalytics, DEFAULT_SESSION_ANALYTICS, type SessionAnalyticsSummary } from '@/lib/session-analytics';
 import * as Haptics from 'expo-haptics';
 
 export type TrainingMode = 'training' | 'testing' | 'cols';
@@ -49,6 +50,7 @@ interface SessionMetrics {
   breaths: BreathMetrics;
   coachingEvents: CoachingEvent[];
   snapshots: SessionSnapshot[];
+  sessionAnalytics: SessionAnalyticsSummary;
 }
 
 interface CPRTrainingState {
@@ -127,6 +129,7 @@ const defaultMetrics: SessionMetrics = {
   },
   coachingEvents: [],
   snapshots: [],
+  sessionAnalytics: DEFAULT_SESSION_ANALYTICS,
 };
 
 const CPRTrainingContext = createContext<CPRTrainingContextValue | null>(null);
@@ -203,6 +206,13 @@ export function CPRTrainingProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
+    if (currentStepId === 'compressions') {
+      resetCycleState();
+      arduinoSerial.setPhase('COMPRESSION');
+    }
+  }, [currentStepId, resetCycleState]);
+
+  useEffect(() => {
     if (currentStepId === 'post_aed_compressions') {
       resetPostShockCycleState();
     }
@@ -222,26 +232,33 @@ export function CPRTrainingProvider({ children }: { children: ReactNode }) {
 
       const isMainCycleStep = stepId === 'compressions';
       const isPostShockCycleStep = stepId === 'post_aed_compressions';
+      const mainCycleLimit = currentMode === 'testing' ? CYCLES_TESTING : CYCLES_TRAINING;
+      const postShockLimit = currentMode === 'testing' ? POST_SHOCK_CYCLES_TESTING : POST_SHOCK_CYCLES_TRAINING;
+      const mainCyclesComplete = completedCyclesRef.current >= mainCycleLimit;
+      const postShockCyclesComplete = postShockCompletedCyclesRef.current >= postShockLimit;
 
       if (training && (isMainCycleStep || isPostShockCycleStep)) {
-        const phase = data.phase === 'BREATH' ? 'breathe' : 'compress';
-        if (isMainCycleStep) {
-          cyclePhaseRef.current = phase;
-          setCyclePhase(phase);
-          cycleCompressionCountRef.current = data.cycleCompressionCount;
-          setCycleCompressionCount(data.cycleCompressionCount);
-          if (data.phase === 'BREATH') {
-            cycleBreathCountRef.current = data.breathCount;
-            setCycleBreathCount(data.breathCount);
-          }
-        } else {
-          postShockCyclePhaseRef.current = phase;
-          setPostShockCyclePhase(phase);
-          postShockCycleCompressionCountRef.current = data.cycleCompressionCount;
-          setPostShockCycleCompressionCount(data.cycleCompressionCount);
-          if (data.phase === 'BREATH') {
-            postShockCycleBreathCountRef.current = data.breathCount;
-            setPostShockCycleBreathCount(data.breathCount);
+        const atCycleLimit = (isMainCycleStep && mainCyclesComplete) || (isPostShockCycleStep && postShockCyclesComplete);
+        if (!atCycleLimit) {
+          const phase = data.phase === 'BREATH' ? 'breathe' : 'compress';
+          if (isMainCycleStep) {
+            cyclePhaseRef.current = phase;
+            setCyclePhase(phase);
+            cycleCompressionCountRef.current = data.cycleCompressionCount;
+            setCycleCompressionCount(data.cycleCompressionCount);
+            if (data.phase === 'BREATH') {
+              cycleBreathCountRef.current = data.breathCount;
+              setCycleBreathCount(data.breathCount);
+            }
+          } else {
+            postShockCyclePhaseRef.current = phase;
+            setPostShockCyclePhase(phase);
+            postShockCycleCompressionCountRef.current = data.cycleCompressionCount;
+            setPostShockCycleCompressionCount(data.cycleCompressionCount);
+            if (data.phase === 'BREATH') {
+              postShockCycleBreathCountRef.current = data.breathCount;
+              setPostShockCycleBreathCount(data.breathCount);
+            }
           }
         }
       }
@@ -312,39 +329,58 @@ export function CPRTrainingProvider({ children }: { children: ReactNode }) {
           }));
 
         } else if (stepId === 'compressions' || stepId === 'post_aed_compressions') {
-          if (stepId === 'compressions') {
-            cycleCompressionCountRef.current = data.cycleCompressionCount;
-            setCycleCompressionCount(data.cycleCompressionCount);
+          const atCycleLimit = (stepId === 'compressions' && mainCyclesComplete)
+            || (stepId === 'post_aed_compressions' && postShockCyclesComplete);
+          if (atCycleLimit) {
+            // skip counting once step goal is met
           } else {
-            postShockCycleCompressionCountRef.current = data.cycleCompressionCount;
-            setPostShockCycleCompressionCount(data.cycleCompressionCount);
+            if (data.phase === 'COMPRESSION') {
+              sessionAnalytics.recordCompressionInPhase(stepId, now);
+            } else if (data.phase === 'BREATH') {
+              sessionAnalytics.markCycleCompressionsComplete(stepId, now);
+            }
+
+            if (stepId === 'compressions') {
+              cycleCompressionCountRef.current = data.cycleCompressionCount;
+              setCycleCompressionCount(data.cycleCompressionCount);
+            } else {
+              postShockCycleCompressionCountRef.current = data.cycleCompressionCount;
+              setPostShockCycleCompressionCount(data.cycleCompressionCount);
+            }
+
+            setMetrics(prev => ({
+              ...prev,
+              compressions: {
+                ...prev.compressions,
+
+                count: prev.compressions.count + 1,
+                totalCompressions: prev.compressions.totalCompressions + 1,
+                goodCompressions: prev.compressions.goodCompressions + (isGood ? 1 : 0),
+
+                avgRate: compressionRates.current.length > 0
+                  ? compressionRates.current.reduce((a, b) => a + b, 0) / compressionRates.current.length
+                  : 0,
+
+                avgDepth: prev.compressions.totalCompressions > 0
+                  ? (prev.compressions.avgDepth * prev.compressions.totalCompressions + depth) / (prev.compressions.totalCompressions + 1)
+                  : depth,
+              },
+            }));
           }
-
-          setMetrics(prev => ({
-            ...prev,
-            compressions: {
-              ...prev.compressions,
-
-              count: prev.compressions.count + 1,
-              totalCompressions: prev.compressions.totalCompressions + 1,
-              goodCompressions: prev.compressions.goodCompressions + (isGood ? 1 : 0),
-
-              avgRate: compressionRates.current.length > 0
-                ? compressionRates.current.reduce((a, b) => a + b, 0) / compressionRates.current.length
-                : 0,
-
-              avgDepth: prev.compressions.totalCompressions > 0
-                ? (prev.compressions.avgDepth * prev.compressions.totalCompressions + depth) / (prev.compressions.totalCompressions + 1)
-                : depth,
-            },
-          }));
         }
       }
 
       if (data.breathDetected && training && (stepId === 'compressions' || stepId === 'post_aed_compressions')) {
+        const isMainCycle = stepId === 'compressions';
+        const atCycleLimit = (isMainCycle && mainCyclesComplete) || (!isMainCycle && postShockCyclesComplete);
+        if (atCycleLimit) {
+          return;
+        }
+
         const isGoodBreath = data.airPressure >= 0.4 && data.airPressure <= 0.9;
         const newBreathCount = data.breathCount;
-        const isMainCycle = stepId === 'compressions';
+
+        sessionAnalytics.recordFirstBreathOfCycle(stepId, Date.now(), newBreathCount);
 
         if (isMainCycle) {
           cycleBreathCountRef.current = newBreathCount;
@@ -355,6 +391,13 @@ export function CPRTrainingProvider({ children }: { children: ReactNode }) {
         }
 
         if (newBreathCount >= BREATHS_PER_CYCLE) {
+          if (isMainCycle && completedCyclesRef.current >= mainCycleLimit) {
+            return;
+          }
+          if (!isMainCycle && postShockCompletedCyclesRef.current >= postShockLimit) {
+            return;
+          }
+
           if (isMainCycle) {
             const newCycles = completedCyclesRef.current + 1;
             setTimeout(() => {
@@ -366,6 +409,7 @@ export function CPRTrainingProvider({ children }: { children: ReactNode }) {
               setCycleBreathCount(0);
               setCyclePhase('compress');
               setCompletedCycles(newCycles);
+              sessionAnalytics.resetCompressionTimingForNewCycle();
             }, 600);
           } else {
             const newCycles = postShockCompletedCyclesRef.current + 1;
@@ -378,6 +422,7 @@ export function CPRTrainingProvider({ children }: { children: ReactNode }) {
               setPostShockCycleBreathCount(0);
               setPostShockCyclePhase('compress');
               setPostShockCompletedCycles(newCycles);
+              sessionAnalytics.resetCompressionTimingForNewCycle();
             }, 600);
           }
         }
@@ -433,6 +478,7 @@ export function CPRTrainingProvider({ children }: { children: ReactNode }) {
 
   const startTraining = useCallback(() => {
     sessionRecorder.startSession();
+    sessionAnalytics.reset();
     setIsTraining(true);
     setIsPaused(false);
     setCurrentStepIndex(0);
@@ -443,6 +489,7 @@ export function CPRTrainingProvider({ children }: { children: ReactNode }) {
       compressions: { ...defaultMetrics.compressions, sets: makeDefaultSets(COMPRESSION_SETS_REQUIRED) },
       coachingEvents: [],
       snapshots: [],
+      sessionAnalytics: DEFAULT_SESSION_ANALYTICS,
     });
     setAedShockDelivered(false);
     setHandPlacementVerified(false);
@@ -464,6 +511,7 @@ export function CPRTrainingProvider({ children }: { children: ReactNode }) {
 
   const resetTraining = useCallback(() => {
     sessionRecorder.reset();
+    sessionAnalytics.reset();
     setIsTraining(false);
     setIsPaused(false);
     setCurrentStepIndex(0);
@@ -519,11 +567,16 @@ export function CPRTrainingProvider({ children }: { children: ReactNode }) {
       const score = metrics.compressions.totalCompressions > 0
         ? Math.round((metrics.compressions.goodCompressions / metrics.compressions.totalCompressions) * 100)
         : 100;
+      const analyticsSummary = sessionAnalytics.finalize(
+        metrics.compressions.avgRate,
+        metrics.compressions.avgDepth,
+      );
       setMetrics(prev => ({
         ...prev,
         overallScore: score,
         coachingEvents: sessionRecorder.getEvents(),
         snapshots: sessionRecorder.getSnapshots(),
+        sessionAnalytics: analyticsSummary,
       }));
       setCurrentStepIndex(CPR_STEPS.length);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);

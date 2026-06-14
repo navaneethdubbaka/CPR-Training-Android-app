@@ -132,6 +132,9 @@ export const POST_SHOCK_CYCLES_TRAINING = 2;
 export const POST_SHOCK_CYCLES_TESTING = 2;
 export const COMPRESSION_SETS_REQUIRED = CYCLES_TRAINING;
 
+export const COMPRESSION_INTERRUPTION_THRESHOLD_MS = 10_000;
+export const COMPRESS_TO_BREATH_TARGET_MS = 6_000;
+
 export const AED_STEP_IDS: CPRStepId[] = ['aed_pads', 'aed_analyze', 'aed_shock'];
 
 export function isAedStep(stepId: CPRStepId): boolean {

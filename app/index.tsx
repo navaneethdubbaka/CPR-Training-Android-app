@@ -202,9 +202,14 @@ useEffect(() => {
   const showAED = isAedStep(currentStepId);
   const framingBlocked = Platform.OS === 'web' && showPoseTracking && !framingGateOpen;
   const showPostShockCycles = currentStep?.id === 'post_aed_compressions';
+  const showCycleTracker = currentStepId === 'compressions' || currentStepId === 'post_aed_compressions';
   const activeCyclePhase = showPostShockCycles ? postShockCyclePhase : cyclePhase;
-  const showCompressions = (currentStep?.id === 'compressions' || showPostShockCycles) && activeCyclePhase === 'compress';
-  const showBreaths = (currentStep?.id === 'compressions' || showPostShockCycles) && activeCyclePhase === 'breathe';
+  const activeCycleCompressionCount = showPostShockCycles ? postShockCycleCompressionCount : cycleCompressionCount;
+  const activeCycleBreathCount = showPostShockCycles ? postShockCycleBreathCount : cycleBreathCount;
+  const activeCompletedCycles = showPostShockCycles ? postShockCompletedCycles : completedCycles;
+  const activeTotalCycles = showPostShockCycles ? postShockTotalCycles : totalCycles;
+  const showCompressions = showCycleTracker && activeCyclePhase === 'compress';
+  const showBreaths = showCycleTracker && activeCyclePhase === 'breathe';
 
   const styles = makeStyles(Colors);
 
@@ -269,14 +274,8 @@ useEffect(() => {
       <>
         <StatusBar style={theme === 'dark' ? 'light' : 'dark'} />
         <CompletionScreen
-          elapsedTime={metrics.elapsedTime}
-          compressionCount={metrics.compressions.totalCompressions}
-          goodCompressions={metrics.compressions.goodCompressions}
-          avgRate={metrics.compressions.avgRate}
-          avgDepth={metrics.compressions.avgDepth}
-          breathCount={metrics.breaths.totalBreaths}
-          goodBreaths={metrics.breaths.goodBreaths}
           overallScore={metrics.overallScore}
+          sessionAnalytics={metrics.sessionAnalytics}
           coachingEvents={metrics.coachingEvents}
           snapshots={metrics.snapshots}
           onRestart={resetTraining}
@@ -361,16 +360,17 @@ useEffect(() => {
         voiceCompleted={voiceCompleted}
         onVoiceSuccess={() => setVoiceCompleted(true)}
         shoulderTapDone={shoulderTapDone}
-        cyclePhase={cyclePhase}
-        cycleCompressionCount={cycleCompressionCount}
-        cycleBreathCount={cycleBreathCount}
-        completedCycles={completedCycles}
-        totalCycles={totalCycles}
+        showCycleTracker={showCycleTracker}
+        cyclePhase={activeCyclePhase}
+        cycleCompressionCount={activeCycleCompressionCount}
+        cycleBreathCount={activeCycleBreathCount}
+        completedCycles={activeCompletedCycles}
+        totalCycles={activeTotalCycles}
       />
 
       {showCompressions && (
         <CompressionFeedback
-          count={showPostShockCycles ? postShockCycleCompressionCount : metrics.compressions.count}
+          count={activeCycleCompressionCount}
           currentRate={metrics.compressions.currentRate}
           currentDepth={metrics.compressions.currentDepth}
           currentForce={sensorData.compressionForce}
@@ -384,14 +384,14 @@ useEffect(() => {
           stepId={currentStepId}
           sets={undefined}
           currentSetIndex={undefined}
-          setsRequired={showPostShockCycles ? postShockTotalCycles : totalCycles}
+          setsRequired={activeTotalCycles}
           showSets={false}
         />
       )}
 
       {showBreaths && (
         <BreathFeedback
-          count={showPostShockCycles ? postShockCycleBreathCount : cycleBreathCount}
+          count={activeCycleBreathCount}
           currentPressure={metrics.breaths.currentPressure}
           goodBreaths={metrics.breaths.goodBreaths}
           totalBreaths={metrics.breaths.totalBreaths}
