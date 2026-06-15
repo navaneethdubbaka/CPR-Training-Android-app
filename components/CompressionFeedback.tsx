@@ -36,6 +36,9 @@ interface CompressionFeedbackProps {
   currentSetIndex?: number;
   setsRequired?: number;
   showSets?: boolean;
+  showCycleBadge?: boolean;
+  completedCycles?: number;
+  totalCycles?: number;
 }
 
 function getRateColor(rate: number, Colors: ReturnType<typeof getColors>): string {
@@ -348,6 +351,9 @@ export function CompressionFeedback({
   stepId,
   currentForce = 0,
   sets, currentSetIndex = 0, setsRequired = COMPRESSION_SETS_REQUIRED, showSets = true,
+  showCycleBadge = false,
+  completedCycles = 0,
+  totalCycles = 1,
 }: CompressionFeedbackProps) {
   const { theme } = useTheme();
   const Colors = getColors(theme);
@@ -436,6 +442,13 @@ export function CompressionFeedback({
           <MaterialCommunityIcons name="heart-pulse" size={28} color={Colors.accent} />
         </Animated.View>
         <Text style={[styles.countText, { color: Colors.text }]}>{displayCount}/{perSetTarget}</Text>
+        {showCycleBadge && (
+          <View style={[styles.cycleBadge, { backgroundColor: `${Colors.feedbackGood}20` }]}>
+            <Text style={[styles.cycleBadgeText, { color: Colors.feedbackGood }]}>
+              Cycle {completedCycles}/{totalCycles}
+            </Text>
+          </View>
+        )}
       </View>
 
       <View style={[styles.progressBar, { backgroundColor: Colors.surfaceLight }]}>
@@ -644,6 +657,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 12,
+    flexWrap: 'wrap',
+  },
+  cycleBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 8,
+  },
+  cycleBadgeText: {
+    fontSize: 12,
+    fontWeight: '700',
   },
   countText: {
     fontSize: 28,

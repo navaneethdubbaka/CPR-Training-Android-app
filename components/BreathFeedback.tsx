@@ -11,6 +11,9 @@ interface BreathFeedbackProps {
   currentPressure: number;
   goodBreaths: number;
   totalBreaths: number;
+  showCycleBadge?: boolean;
+  completedCycles?: number;
+  totalCycles?: number;
 }
 
 function getPressureColor(pressure: number, Colors: ReturnType<typeof getColors>): string {
@@ -27,7 +30,12 @@ function getPressureLabel(pressure: number): string {
   return 'Good Breath';
 }
 
-export function BreathFeedback({ count, currentPressure, goodBreaths, totalBreaths }: BreathFeedbackProps) {
+export function BreathFeedback({
+  count, currentPressure, goodBreaths, totalBreaths,
+  showCycleBadge = false,
+  completedCycles = 0,
+  totalCycles = 1,
+}: BreathFeedbackProps) {
   const { theme } = useTheme();
   const Colors = getColors(theme);
   const lungScale = useSharedValue(1);
@@ -64,6 +72,13 @@ export function BreathFeedback({ count, currentPressure, goodBreaths, totalBreat
         </Animated.View>
         <Text style={[styles.title, { color: Colors.text }]}>Rescue Breaths</Text>
         <Text style={[styles.countText, { color: Colors.info }]}>{count}/{BREATHS_PER_CYCLE}</Text>
+        {showCycleBadge && (
+          <View style={[styles.cycleBadge, { backgroundColor: `${Colors.feedbackGood}20` }]}>
+            <Text style={[styles.cycleBadgeText, { color: Colors.feedbackGood }]}>
+              Cycle {completedCycles}/{totalCycles}
+            </Text>
+          </View>
+        )}
       </View>
 
       <View style={styles.breathRow}>
@@ -124,6 +139,15 @@ const styles = StyleSheet.create({
   countText: {
     fontSize: 22,
     fontWeight: '800',
+  },
+  cycleBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 8,
+  },
+  cycleBadgeText: {
+    fontSize: 12,
+    fontWeight: '700',
   },
   breathRow: {
     flexDirection: 'row',

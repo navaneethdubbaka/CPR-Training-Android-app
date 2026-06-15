@@ -123,6 +123,76 @@ export function InstructionPanel({
         )}
       </View>
 
+      {showCycleTracker && (
+        <View style={[styles.cycleTracker, { backgroundColor: Colors.surfaceLight }]}>
+          <View style={styles.cycleHeader}>
+            <MaterialCommunityIcons
+              name={cyclePhase === 'compress' ? 'heart-pulse' : 'lungs'}
+              size={16}
+              color={cyclePhase === 'compress' ? Colors.accent : Colors.info}
+            />
+            <Text style={[styles.cyclePhaseLabel, {
+              color: cyclePhase === 'compress' ? Colors.accent : Colors.info,
+            }]}>
+              {cyclePhase === 'compress' ? 'COMPRESSION PHASE' : 'BREATH PHASE'}
+            </Text>
+            <View style={[styles.cycleBadge, { backgroundColor: `${Colors.feedbackGood}20` }]}>
+              <Text style={[styles.cycleBadgeText, { color: Colors.feedbackGood }]}>
+                Cycle {completedCycles}/{totalCycles}
+              </Text>
+            </View>
+          </View>
+
+          <View style={styles.cycleCountsRow}>
+            {cyclePhase === 'compress' ? (
+              <View style={styles.cycleCount}>
+                <Text style={[styles.cycleCountNum, { color: Colors.accent }]}>
+                  {cycleCompressionCount}/{COMPRESSIONS_PER_CYCLE}
+                </Text>
+                <Text style={[styles.cycleCountLabel, { color: Colors.textMuted }]}>Compressions</Text>
+                <View style={[styles.cycleBar, { backgroundColor: Colors.surfaceHighlight }]}>
+                  <View style={[styles.cycleBarFill, {
+                    width: `${Math.min((cycleCompressionCount / COMPRESSIONS_PER_CYCLE) * 100, 100)}%` as any,
+                    backgroundColor: Colors.accent,
+                  }]} />
+                </View>
+              </View>
+            ) : (
+              <View style={styles.cycleCount}>
+                <Text style={[styles.cycleCountNum, { color: Colors.info }]}>
+                  {cycleBreathCount}/{BREATHS_PER_CYCLE}
+                </Text>
+                <Text style={[styles.cycleCountLabel, { color: Colors.textMuted }]}>Rescue Breaths</Text>
+                <Text style={[styles.cycleBreathHint, { color: Colors.textMuted }]}>
+                  Open airway — tilt head back, lift chin, seal & breathe
+                </Text>
+              </View>
+            )}
+          </View>
+
+          <View style={styles.completedCyclesRow}>
+            {Array.from({ length: totalCycles }).map((_, i) => (
+              <View
+                key={i}
+                style={[styles.cycleDot, {
+                  backgroundColor: i < completedCycles ? Colors.feedbackGood : Colors.surfaceHighlight,
+                  borderColor: i === completedCycles ? Colors.accent : 'transparent',
+                }]}
+              />
+            ))}
+          </View>
+        </View>
+      )}
+
+      {showCycleTracker && completedCycles >= totalCycles && (
+        <View style={[styles.cyclesCompleteBanner, { backgroundColor: `${Colors.feedbackGood}20`, borderColor: Colors.feedbackGood }]}>
+          <MaterialCommunityIcons name="check-circle" size={18} color={Colors.feedbackGood} />
+          <Text style={[styles.cyclesCompleteText, { color: Colors.feedbackGood }]}>
+            All {totalCycles} cycles complete — finishing session…
+          </Text>
+        </View>
+      )}
+
       {autoAdvanceText && !isSceneSafety && !isCheckResponsiveness && !isCall911 && !hideHints ? (
         <View style={styles.autoAdvanceRow}>
           <MaterialCommunityIcons name="timer-sand" size={16} color={Colors.info} />
@@ -215,67 +285,6 @@ export function InstructionPanel({
         />
       )}
 
-      {showCycleTracker && (
-        <View style={[styles.cycleTracker, { backgroundColor: Colors.surfaceLight }]}>
-          <View style={styles.cycleHeader}>
-            <MaterialCommunityIcons
-              name={cyclePhase === 'compress' ? 'heart-pulse' : 'lungs'}
-              size={16}
-              color={cyclePhase === 'compress' ? Colors.accent : Colors.info}
-            />
-            <Text style={[styles.cyclePhaseLabel, {
-              color: cyclePhase === 'compress' ? Colors.accent : Colors.info,
-            }]}>
-              {cyclePhase === 'compress' ? 'COMPRESSION PHASE' : 'BREATH PHASE'}
-            </Text>
-            <View style={[styles.cycleBadge, { backgroundColor: `${Colors.feedbackGood}20` }]}>
-              <Text style={[styles.cycleBadgeText, { color: Colors.feedbackGood }]}>
-                Cycle {completedCycles}/{totalCycles}
-              </Text>
-            </View>
-          </View>
-
-          <View style={styles.cycleCountsRow}>
-            {cyclePhase === 'compress' ? (
-              <View style={styles.cycleCount}>
-                <Text style={[styles.cycleCountNum, { color: Colors.accent }]}>
-                  {cycleCompressionCount}/{COMPRESSIONS_PER_CYCLE}
-                </Text>
-                <Text style={[styles.cycleCountLabel, { color: Colors.textMuted }]}>Compressions</Text>
-                <View style={[styles.cycleBar, { backgroundColor: Colors.surfaceHighlight }]}>
-                  <View style={[styles.cycleBarFill, {
-                    width: `${Math.min((cycleCompressionCount / COMPRESSIONS_PER_CYCLE) * 100, 100)}%` as any,
-                    backgroundColor: Colors.accent,
-                  }]} />
-                </View>
-              </View>
-            ) : (
-              <View style={styles.cycleCount}>
-                <Text style={[styles.cycleCountNum, { color: Colors.info }]}>
-                  {cycleBreathCount}/{BREATHS_PER_CYCLE}
-                </Text>
-                <Text style={[styles.cycleCountLabel, { color: Colors.textMuted }]}>Rescue Breaths</Text>
-                <Text style={[styles.cycleBreathHint, { color: Colors.textMuted }]}>
-                  Open airway — tilt head back, lift chin, seal & breathe
-                </Text>
-              </View>
-            )}
-          </View>
-
-          <View style={styles.completedCyclesRow}>
-            {Array.from({ length: totalCycles }).map((_, i) => (
-              <View
-                key={i}
-                style={[styles.cycleDot, {
-                  backgroundColor: i < completedCycles ? Colors.feedbackGood : Colors.surfaceHighlight,
-                  borderColor: i === completedCycles ? Colors.accent : 'transparent',
-                }]}
-              />
-            ))}
-          </View>
-        </View>
-      )}
-
       {framingBlocked && (
         <View style={[styles.framingBanner, { backgroundColor: 'rgba(229,57,53,0.12)', borderColor: Colors.accent }]}>
           <MaterialCommunityIcons name="crop-free" size={18} color={Colors.accent} />
@@ -289,18 +298,18 @@ export function InstructionPanel({
             styles.advanceBtn,
             { backgroundColor: Colors.surfaceHighlight },
             canAdvance && { backgroundColor: Colors.accent },
-            framingBlocked && styles.advanceBtnDisabled,
-            pressed && canAdvance && !framingBlocked && styles.advanceBtnPressed,
+            framingBlocked && !canAdvance && styles.advanceBtnDisabled,
+            pressed && canAdvance && !(framingBlocked && !canAdvance) && styles.advanceBtnPressed,
           ]}
-          disabled={framingBlocked}
+          disabled={framingBlocked && !canAdvance}
           onPress={() => {
-            if (framingBlocked) return;
+            if (framingBlocked && !canAdvance) return;
             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
             onAdvance();
           }}
         >
           <Text style={[styles.advanceBtnText, { color: Colors.text }]}>
-            {framingBlocked
+            {framingBlocked && !canAdvance
               ? 'Align in frame to continue'
               : canAdvance
                 ? 'Continue'
@@ -432,6 +441,19 @@ const styles = StyleSheet.create({
   waitingText: {
     fontSize: 12,
     fontWeight: '600',
+  },
+  cyclesCompleteBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    padding: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+  },
+  cyclesCompleteText: {
+    flex: 1,
+    fontSize: 13,
+    fontWeight: '700',
   },
   cycleTracker: {
     borderRadius: 12,

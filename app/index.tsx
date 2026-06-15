@@ -157,9 +157,12 @@ useEffect(() => {
     }
   }, [currentStep, sensorData, stepTimer, handPlacementVerified, completedCycles, totalCycles, aedShockDelivered, postShockCompletedCycles, postShockTotalCycles, shoulderTapDone, voiceCompleted]);
 
-  const stepCanAdvance = framingGateOpen && (
-    currentStep?.autoAdvance ? canAutoAdvance : true
-  );
+  const stepCanAdvance = useMemo(() => {
+    const isCycleStep =
+      currentStep?.id === 'compressions' || currentStep?.id === 'post_aed_compressions';
+    if (isCycleStep && canAutoAdvance) return true;
+    return framingGateOpen && (currentStep?.autoAdvance ? canAutoAdvance : true);
+  }, [currentStep, canAutoAdvance, framingGateOpen]);
 
   useEffect(() => {
     if (stepCanAdvance && currentStep?.autoAdvance && isTraining && !isPaused) {
@@ -176,6 +179,9 @@ useEffect(() => {
       case 'hand_placement':
         return handPlacementVerified ? 'Hands verified' : 'Verifying hand position...';
       case 'compressions': {
+        if (completedCycles >= totalCycles) {
+          return `All ${totalCycles} cycles complete — finishing…`;
+        }
         if (cyclePhase === 'compress') {
           return `Compressions: ${cycleCompressionCount}/${COMPRESSIONS_PER_CYCLE} | Cycles: ${completedCycles}/${totalCycles}`;
         }
@@ -189,6 +195,9 @@ useEffect(() => {
       case 'aed_analyze':
         return `Analyzing: ${stepTimer}s / 5s`;
       case 'post_aed_compressions': {
+        if (postShockCompletedCycles >= postShockTotalCycles) {
+          return `All ${postShockTotalCycles} cycles complete — finishing…`;
+        }
         if (postShockCyclePhase === 'compress') {
           return `Compressions: ${postShockCycleCompressionCount}/${COMPRESSIONS_PER_CYCLE} | Cycles: ${postShockCompletedCycles}/${postShockTotalCycles}`;
         }
@@ -208,8 +217,9 @@ useEffect(() => {
   const activeCycleBreathCount = showPostShockCycles ? postShockCycleBreathCount : cycleBreathCount;
   const activeCompletedCycles = showPostShockCycles ? postShockCompletedCycles : completedCycles;
   const activeTotalCycles = showPostShockCycles ? postShockTotalCycles : totalCycles;
-  const showCompressions = showCycleTracker && activeCyclePhase === 'compress';
-  const showBreaths = showCycleTracker && activeCyclePhase === 'breathe';
+  const allCyclesComplete = showCycleTracker && activeCompletedCycles >= activeTotalCycles;
+  const showCompressions = showCycleTracker && activeCyclePhase === 'compress' && !allCyclesComplete;
+  const showBreaths = showCycleTracker && activeCyclePhase === 'breathe' && !allCyclesComplete;
 
   const styles = makeStyles(Colors);
 
@@ -321,7 +331,7 @@ useEffect(() => {
         />
       )}
 
-      {!hardwareOnly && (
+      {!hardwareOnly && !allCyclesComplete && (
         <SimulationControls
           currentStepId={currentStepId}
           cyclePhase={activeCyclePhase}
@@ -386,6 +396,9 @@ useEffect(() => {
           currentSetIndex={undefined}
           setsRequired={activeTotalCycles}
           showSets={false}
+          showCycleBadge={showCycleTracker}
+          completedCycles={activeCompletedCycles}
+          totalCycles={activeTotalCycles}
         />
       )}
 
@@ -395,6 +408,9 @@ useEffect(() => {
           currentPressure={metrics.breaths.currentPressure}
           goodBreaths={metrics.breaths.goodBreaths}
           totalBreaths={metrics.breaths.totalBreaths}
+          showCycleBadge={showCycleTracker}
+          completedCycles={activeCompletedCycles}
+          totalCycles={activeTotalCycles}
         />
       )}
     </View>

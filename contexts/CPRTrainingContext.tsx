@@ -398,8 +398,21 @@ export function CPRTrainingProvider({ children }: { children: ReactNode }) {
             return;
           }
 
-          if (isMainCycle) {
-            const newCycles = completedCyclesRef.current + 1;
+          const newCycles = isMainCycle
+            ? completedCyclesRef.current + 1
+            : postShockCompletedCyclesRef.current + 1;
+          const limit = isMainCycle ? mainCycleLimit : postShockLimit;
+
+          if (newCycles >= limit) {
+            if (isMainCycle) {
+              completedCyclesRef.current = newCycles;
+              setCompletedCycles(newCycles);
+            } else {
+              postShockCompletedCyclesRef.current = newCycles;
+              setPostShockCompletedCycles(newCycles);
+            }
+            sessionAnalytics.resetCompressionTimingForNewCycle();
+          } else if (isMainCycle) {
             setTimeout(() => {
               cycleCompressionCountRef.current = 0;
               cycleBreathCountRef.current = 0;
@@ -412,7 +425,6 @@ export function CPRTrainingProvider({ children }: { children: ReactNode }) {
               sessionAnalytics.resetCompressionTimingForNewCycle();
             }, 600);
           } else {
-            const newCycles = postShockCompletedCyclesRef.current + 1;
             setTimeout(() => {
               postShockCycleCompressionCountRef.current = 0;
               postShockCycleBreathCountRef.current = 0;
