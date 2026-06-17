@@ -8,11 +8,20 @@ import { useTheme } from '@/contexts/ThemeContext';
 import type { CoachingEvent, SessionSnapshot } from '@/lib/session-recorder';
 import type { SessionAnalyticsSummary } from '@/lib/session-analytics';
 import { sessionRecorder } from '@/lib/session-recorder';
-import { COMPRESS_TO_BREATH_TARGET_MS } from '@/constants/cpr-protocol';
+import {
+  COMPRESS_TO_BREATH_TARGET_MS,
+  getSessionBreathTarget,
+  getSessionCompressionTarget,
+  type SessionTargetMode,
+} from '@/constants/cpr-protocol';
 
 interface CompletionScreenProps {
   overallScore: number;
   sessionAnalytics: SessionAnalyticsSummary;
+  elapsedTime: number;
+  totalCompressions: number;
+  totalBreaths: number;
+  trainingMode: SessionTargetMode;
   coachingEvents?: CoachingEvent[];
   snapshots?: SessionSnapshot[];
   onRestart: () => void;
@@ -49,6 +58,15 @@ function AnimatedStat({ label, value, unit, sublabel, delay, color, surfaceColor
   );
 }
 
+function formatTime(ms: number): string {
+  const totalSec = Math.floor(ms / 1000);
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = totalSec % 60;
+  if (h > 0) return `${h}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+  return `${m}:${s.toString().padStart(2, '0')}`;
+}
+
 function formatGapSeconds(ms: number): string {
   if (ms <= 0) return '--';
   return (ms / 1000).toFixed(1);
@@ -57,6 +75,10 @@ function formatGapSeconds(ms: number): string {
 export function CompletionScreen({
   overallScore,
   sessionAnalytics,
+  elapsedTime,
+  totalCompressions,
+  totalBreaths,
+  trainingMode,
   coachingEvents = [],
   snapshots = [],
   onRestart,
@@ -67,6 +89,9 @@ export function CompletionScreen({
   const Colors = getColors(theme);
   const scoreScale = useSharedValue(0);
   const [logExpanded, setLogExpanded] = useState(false);
+
+  const compressionTarget = getSessionCompressionTarget(trainingMode);
+  const breathTarget = getSessionBreathTarget(trainingMode);
 
   useEffect(() => {
     scoreScale.value = withDelay(200, withSpring(1, { damping: 12 }));
@@ -91,11 +116,20 @@ export function CompletionScreen({
   const gapOk = maxGapMs === 0 || maxGapMs <= COMPRESS_TO_BREATH_TARGET_MS;
   const gapColor = maxGapMs === 0 ? Colors.textMuted : gapOk ? Colors.feedbackGood : Colors.feedbackBad;
 
+  const compressionsMet = totalCompressions >= compressionTarget;
+  const breathsMet = totalBreaths >= breathTarget;
+
   const handleDownloadReport = () => {
     if (Platform.OS !== 'web' || typeof document === 'undefined') return;
     const report = sessionRecorder.exportReport({
       overallScore,
       sessionAnalytics,
+      elapsedTime,
+      totalCompressions,
+      totalBreaths,
+      compressionTarget,
+      breathTarget,
+      trainingMode,
     });
     const blob = new Blob([report], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -124,9 +158,33 @@ export function CompletionScreen({
 
       <View style={styles.statsGrid}>
         <AnimatedStat
-          label="Elbow folds"
-          value={String(sessionAnalytics.elbowFoldCount)}
+          label="Duration"
+          value={formatTime(elapsedTime)}
           delay={300}
+          color={Colors.info}
+          surfaceColor={Colors.surface}
+          mutedColor={Colors.textMuted}
+        />
+        <AnimatedStat
+          label="Compressions"
+          value={`${totalCompressions}/${compressionTarget}`}
+          delay={400}
+          color={compressionsMet ? Colors.feedbackGood : Colors.feedbackBad}
+          surfaceColor={Colors.surface}
+          mutedColor={Colors.textMuted}
+        />
+        <AnimatedStat
+          label="Breaths"
+          value={`${totalBreaths}/${breathTarget}`}
+          delay={500}
+          color={breathsMet ? Colors.feedbackGood : Colors.info}
+          surfaceColor={Colors.surface}
+          mutedColor={Colors.textMuted}
+        />
+        <AnimatedStat
+          label="Wrong hand positions"
+          value={String(sessionAnalytics.elbowFoldCount)}
+          delay={600}
           color={sessionAnalytics.elbowFoldCount === 0 ? Colors.feedbackGood : Colors.feedbackOk}
           surfaceColor={Colors.surface}
           mutedColor={Colors.textMuted}
@@ -135,17 +193,17 @@ export function CompletionScreen({
           label="Interruptions"
           value={String(sessionAnalytics.compressionInterruptions)}
           sublabel="≥10s between compressions"
-          delay={400}
+          delay={700}
           color={sessionAnalytics.compressionInterruptions === 0 ? Colors.feedbackGood : Colors.feedbackBad}
           surfaceColor={Colors.surface}
           mutedColor={Colors.textMuted}
         />
         <AnimatedStat
-          label="Max compress→breath"
+          label="Max C-B Time"
           value={formatGapSeconds(maxGapMs)}
           unit="s"
           sublabel={`Target ≤ ${COMPRESS_TO_BREATH_TARGET_MS / 1000}s`}
-          delay={500}
+          delay={800}
           color={gapColor}
           surfaceColor={Colors.surface}
           mutedColor={Colors.textMuted}
@@ -153,7 +211,7 @@ export function CompletionScreen({
         <AnimatedStat
           label="Didn't look down"
           value={String(sessionAnalytics.lookDownFailCount)}
-          delay={600}
+          delay={900}
           color={sessionAnalytics.lookDownFailCount === 0 ? Colors.feedbackGood : Colors.feedbackOk}
           surfaceColor={Colors.surface}
           mutedColor={Colors.textMuted}
@@ -162,7 +220,7 @@ export function CompletionScreen({
           label="Avg rate"
           value={sessionAnalytics.avgRate > 0 ? Math.round(sessionAnalytics.avgRate).toString() : '--'}
           unit="BPM"
-          delay={700}
+          delay={1000}
           color={Colors.feedbackGood}
           surfaceColor={Colors.surface}
           mutedColor={Colors.textMuted}
@@ -171,7 +229,7 @@ export function CompletionScreen({
           label="Avg depth"
           value={sessionAnalytics.avgDepth > 0 ? sessionAnalytics.avgDepth.toFixed(1) : '--'}
           unit="cm"
-          delay={800}
+          delay={1100}
           color={Colors.feedbackGood}
           surfaceColor={Colors.surface}
           mutedColor={Colors.textMuted}
@@ -292,11 +350,14 @@ const styles = StyleSheet.create({
     gap: 12,
     justifyContent: 'center',
     maxWidth: 500,
+    width: '100%',
   },
   stat: {
     borderRadius: 12,
     padding: 14,
-    width: 140,
+    width: '30%',
+    minWidth: 145,
+    maxWidth: 155,
     alignItems: 'center',
     gap: 4,
     minHeight: 88,

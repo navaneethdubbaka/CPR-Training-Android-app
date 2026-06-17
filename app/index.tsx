@@ -286,6 +286,10 @@ useEffect(() => {
         <CompletionScreen
           overallScore={metrics.overallScore}
           sessionAnalytics={metrics.sessionAnalytics}
+          elapsedTime={metrics.elapsedTime}
+          totalCompressions={metrics.compressions.totalCompressions}
+          totalBreaths={metrics.breaths.totalBreaths}
+          trainingMode={isTesting ? 'testing' : 'training'}
           coachingEvents={metrics.coachingEvents}
           snapshots={metrics.snapshots}
           onRestart={resetTraining}

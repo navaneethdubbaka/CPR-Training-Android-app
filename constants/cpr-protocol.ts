@@ -140,3 +140,21 @@ export const AED_STEP_IDS: CPRStepId[] = ['aed_pads', 'aed_analyze', 'aed_shock'
 export function isAedStep(stepId: CPRStepId): boolean {
   return AED_STEP_IDS.includes(stepId);
 }
+
+export type SessionTargetMode = 'training' | 'testing';
+
+function getSessionCycleCounts(mode: SessionTargetMode): { mainCycles: number; postShockCycles: number } {
+  return mode === 'testing'
+    ? { mainCycles: CYCLES_TESTING, postShockCycles: POST_SHOCK_CYCLES_TESTING }
+    : { mainCycles: CYCLES_TRAINING, postShockCycles: POST_SHOCK_CYCLES_TRAINING };
+}
+
+export function getSessionCompressionTarget(mode: SessionTargetMode): number {
+  const { mainCycles, postShockCycles } = getSessionCycleCounts(mode);
+  return (mainCycles + postShockCycles) * COMPRESSIONS_PER_CYCLE;
+}
+
+export function getSessionBreathTarget(mode: SessionTargetMode): number {
+  const { mainCycles, postShockCycles } = getSessionCycleCounts(mode);
+  return (mainCycles + postShockCycles) * BREATHS_PER_CYCLE;
+}
