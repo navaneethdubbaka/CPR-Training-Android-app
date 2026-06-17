@@ -465,7 +465,8 @@ export function CPRTrainingProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
-    if (isTraining && !isPaused) {
+    const sessionActive = isTraining && !isPaused && currentStepIndex < CPR_STEPS.length;
+    if (sessionActive) {
       timerRef.current = setInterval(() => {
         setStepTimer(prev => prev + 1);
         setMetrics(prev => ({
@@ -482,7 +483,7 @@ export function CPRTrainingProvider({ children }: { children: ReactNode }) {
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
     };
-  }, [isTraining, isPaused]);
+  }, [isTraining, isPaused, currentStepIndex]);
 
   const setMode = useCallback((m: TrainingMode) => {
     setModeState(m);
@@ -585,6 +586,7 @@ export function CPRTrainingProvider({ children }: { children: ReactNode }) {
       );
       setMetrics(prev => ({
         ...prev,
+        elapsedTime: Date.now() - prev.startTime,
         overallScore: score,
         coachingEvents: sessionRecorder.getEvents(),
         snapshots: sessionRecorder.getSnapshots(),
