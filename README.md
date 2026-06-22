@@ -14,6 +14,7 @@ This guide covers **cloning the repo and running the web version** in a browser�
 | Camera preview | Yes (allow browser camera permission) |
 | Pose tracking (skeleton, sternal zone, posture tips) | Yes — **MoveNet** via TensorFlow.js |
 | Hand placement verification (~1.5s good posture) | Yes — on **step 4 (Hand Placement)** |
+| Arduino USB via Web Serial | Yes — **Chrome/Edge**, plug Arduino into PC, Settings → **USB (Web Serial)** |
 | Arduino USB (OTG) | No — use **Android dev build** |
 | Sensor simulation (no hardware) | Yes — turn off **Hardware Only Mode** in Settings |
 
@@ -37,9 +38,9 @@ Install on the machine that will run the app:
 3. A **webcam** (built-in or USB) for pose/camera steps
 4. Stable **internet** on first run (downloads the MoveNet pose model, ~few MB)
 
-Optional (only if using real Arduino over WebSocket):
+Optional (only if using Arduino via **WebSocket** instead of direct USB):
 
-- **Backend server** — same repo, second terminal (see [Optional: backend server](#optional-backend-server-for-arduino-websocket))
+- **Backend server** — same repo, second terminal (see [Optional: backend server for Arduino WebSocket](#optional-backend-server-for-arduino-websocket))
 
 ---
 
@@ -105,6 +106,17 @@ npx expo start --web --clear
 ### Allow camera
 
 When prompted, choose **Allow** for camera access on `localhost`. Without it, the camera panel stays black or shows an error with a **Retry** button.
+
+### Connect Arduino via USB (web — primary hardware path)
+
+1. Flash the Arduino sketch from `attached_assets/final_arduino_code_*.ino` at **115200 baud**.
+2. Plug the Arduino into the **same PC** running the browser via USB.
+3. Open **Settings → Connection**. The default mode is **USB (Web Serial)** (Chrome or Edge required).
+4. Tap **Connect** on the start screen or in Settings.
+5. Chrome shows a **COM port picker** — select your Arduino board.
+6. Open Settings → **Serial** tab to confirm CSV lines are streaming (~10 Hz).
+
+If you cancel the port picker or Web Serial is unavailable, turn **Hardware Only Mode OFF** to use simulation, or choose **WebSocket** in Settings if using the Node server instead.
 
 ### Turn off Hardware Only Mode (demo without Arduino)
 
@@ -187,7 +199,7 @@ Assign **Compression Force** to a **dedicated** analog channel (not shared with 
 
 ## Optional: backend server for Arduino WebSocket
 
-Only needed if you connect a real Arduino through the **PC running the server** (not required for web simulation demo).
+Only needed if you connect Arduino through the **PC running the server** using **WebSocket mode** in Settings (not the default web path — use **USB (Web Serial)** for direct browser USB).
 
 **Terminal 1 — backend (port 5000):**
 
@@ -201,7 +213,7 @@ npm run server:dev
 npx expo start --web
 ```
 
-The web client talks to `http://localhost:5000` (WebSocket `/ws/arduino`) when using server-backed connection modes in Settings.
+The web client talks to `http://localhost:5000` (WebSocket `/ws/arduino`) only when **WebSocket** is selected in Settings → Connection.
 
 ---
 

@@ -39,6 +39,51 @@ interface SettingsModalProps {
 
 const COMMON_BAUD_RATES = [9600, 14400, 19200, 28800, 38400, 57600, 115200, 250000];
 
+type IconName = React.ComponentProps<typeof MaterialCommunityIcons>['name'];
+
+const WEB_CONNECTION_OPTIONS: { key: PreferredConnection; label: string; icon: IconName; desc: string }[] = [
+  { key: 'webserial', label: 'USB (Web Serial)', icon: 'usb', desc: 'Chrome USB — primary' },
+  { key: 'websocket', label: 'WebSocket', icon: 'lan-connect', desc: 'Via backend server' },
+  { key: 'tcp', label: 'WiFi/TCP', icon: 'wifi', desc: 'ESP32 WebSocket bridge' },
+];
+
+const NATIVE_CONNECTION_OPTIONS: { key: PreferredConnection; label: string; icon: IconName; desc: string }[] = [
+  { key: 'auto', label: 'Auto', icon: 'auto-fix', desc: 'USB → BLE → WiFi → WS' },
+  { key: 'usb', label: 'USB OTG', icon: 'usb', desc: 'Direct Android USB' },
+  { key: 'ble', label: 'Bluetooth', icon: 'bluetooth', desc: 'BLE serial module' },
+  { key: 'tcp', label: 'WiFi/TCP', icon: 'wifi', desc: 'ESP32 or network' },
+  { key: 'webserial', label: 'Web Serial', icon: 'serial-port', desc: 'Chrome browser USB' },
+  { key: 'websocket', label: 'WebSocket', icon: 'lan-connect', desc: 'Via backend server' },
+];
+
+function getConnectedModeLabel(
+  connectionMode: string,
+  isWeb: boolean,
+): string {
+  if (connectionMode === 'webserial' && isWeb) return 'USB (Web Serial)';
+  if (connectionMode === 'usb') return 'USB OTG';
+  if (connectionMode === 'ble') return 'Bluetooth LE';
+  if (connectionMode === 'tcp') return 'WiFi/TCP';
+  if (connectionMode === 'webserial') return 'Web Serial';
+  if (connectionMode === 'hardware') return 'WebSocket';
+  return connectionMode;
+}
+
+function getDisconnectedHint(
+  preferredConnection: PreferredConnection,
+  hardwareOnly: boolean,
+  isWeb: boolean,
+): string {
+  if (!hardwareOnly) return 'No device found';
+  if (isWeb) {
+    if (preferredConnection === 'websocket') return 'Start server and connect via WebSocket';
+    if (preferredConnection === 'tcp') return 'Connect via WiFi/TCP';
+    return 'Connect Arduino via USB (Web Serial) in Chrome';
+  }
+  if (preferredConnection === 'auto') return 'Connect via USB/BLE/TCP';
+  return `Connect via ${preferredConnection}`;
+}
+
 const ARDUINO_BOARDS = [
   { name: 'Arduino Uno', baudRate: 115200, mcu: 'ATmega328P', icon: 'chip' },
   { name: 'Arduino Mega 2560', baudRate: 115200, mcu: 'ATmega2560', icon: 'chip' },
@@ -61,8 +106,6 @@ const LINE_ENDINGS = [
   { label: 'Carriage Return (\\r)', value: '\r' },
   { label: 'Both (\\r\\n)', value: '\r\n' },
 ];
-
-type IconName = React.ComponentProps<typeof MaterialCommunityIcons>['name'];
 
 const CHANNEL_TYPE_ICONS: Record<string, IconName> = {
   i2c_touch: 'gesture-tap',
@@ -620,6 +663,12 @@ export function SettingsModal({ visible, onClose, connectionStatus, onConnect, o
   const [selectedBleId, setSelectedBleId] = useState<string | null>(null);
   const [tcpConfig, setTcpConfig] = useState(arduinoSerial.getTcpConfig());
   const isConnected = connectionStatus === 'connected';
+  const isWeb = Platform.OS === 'web';
+  const connectionOptions = isWeb ? WEB_CONNECTION_OPTIONS : NATIVE_CONNECTION_OPTIONS;
+  const showWebSerialSection = isWeb && (
+    preferredConnection === 'webserial' || preferredConnection === 'usb' || preferredConnection === 'auto'
+  );
+  const showServerPorts = !isWeb || preferredConnection === 'websocket';
 
   useEffect(() => {
     if (!visible) return;
@@ -978,10 +1027,12 @@ export function SettingsModal({ visible, onClose, connectionStatus, onConnect, o
                           </Text>
                           <Text style={styles.statusDetail}>
                             {isConnected
-                              ? `${connectionMode === 'usb' ? 'USB OTG' : connectionMode === 'ble' ? 'Bluetooth LE' : connectionMode === 'tcp' ? 'WiFi/TCP' : connectionMode === 'webserial' ? 'Web Serial' : 'WebSocket'} | ${config.baudRate} baud`
+                              ? `${getConnectedModeLabel(connectionMode, isWeb)} | ${config.baudRate} baud`
                               : connectionStatus === 'error'
-                                ? (hardwareOnly ? `Hardware-only mode — connect via ${preferredConnection === 'auto' ? 'USB/BLE/TCP' : preferredConnection}` : 'No device found')
-                                : 'No device detected'}
+                                ? getDisconnectedHint(preferredConnection, hardwareOnly, isWeb)
+                                : isWeb && (preferredConnection === 'webserial' || preferredConnection === 'usb' || preferredConnection === 'auto')
+                                  ? 'Plug in Arduino via USB, then tap Connect'
+                                  : 'No device detected'}
                           </Text>
                         </View>
                       </View>
@@ -1005,14 +1056,7 @@ export function SettingsModal({ visible, onClose, connectionStatus, onConnect, o
                   <View style={styles.section}>
                     <Text style={styles.sectionTitle}>Connection Type</Text>
                     <View style={styles.connTypeGrid}>
-                      {([
-                        { key: 'auto',      label: 'Auto',      icon: 'auto-fix',        desc: 'USB → BLE → WiFi → WS' },
-                        { key: 'usb',       label: 'USB OTG',   icon: 'usb',             desc: 'Direct Android USB' },
-                        { key: 'ble',       label: 'Bluetooth', icon: 'bluetooth',        desc: 'BLE serial module' },
-                        { key: 'tcp',       label: 'WiFi/TCP',  icon: 'wifi',             desc: 'ESP32 or network' },
-                        { key: 'webserial', label: 'Web Serial',icon: 'serial-port',      desc: 'Chrome browser USB' },
-                        { key: 'websocket', label: 'WebSocket', icon: 'lan-connect',      desc: 'Via backend server' },
-                      ] as { key: PreferredConnection; label: string; icon: IconName; desc: string }[]).map(opt => (
+                      {connectionOptions.map(opt => (
                         <Pressable
                           key={opt.key}
                           style={[styles.connTypeBtn, preferredConnection === opt.key && styles.connTypeBtnActive]}
@@ -1065,7 +1109,7 @@ export function SettingsModal({ visible, onClose, connectionStatus, onConnect, o
                     </View>
                   )}
 
-                  {(preferredConnection === 'tcp' || preferredConnection === 'auto') && (
+                  {(preferredConnection === 'tcp' || (!isWeb && preferredConnection === 'auto')) && (
                     <View style={styles.section}>
                       <Text style={styles.sectionTitle}>WiFi / TCP Connection</Text>
                       <View style={styles.tcpRow}>
@@ -1098,14 +1142,16 @@ export function SettingsModal({ visible, onClose, connectionStatus, onConnect, o
                     </View>
                   )}
 
-                  {preferredConnection === 'webserial' && (
+                  {showWebSerialSection && (
                     <View style={styles.section}>
-                      <Text style={styles.sectionTitle}>Web Serial (Chrome)</Text>
+                      <Text style={styles.sectionTitle}>USB via Web Serial</Text>
                       <View style={styles.noPortsCard}>
                         <MaterialCommunityIcons name="google-chrome" size={20} color={C.textMuted} />
                         <Text style={styles.noPortsText}>
-                          Web Serial connects Chrome to a USB Arduino directly. Click Connect and Chrome will show a port picker.
-                          {!arduinoSerial.isWebSerialAvailable() ? '\n\nNot available in this browser — use Chrome on desktop.' : '\n\nWeb Serial API is available.'}
+                          {`1. Flash the Arduino sketch at ${config.baudRate} baud\n2. Plug Arduino into this PC via USB\n3. Tap Connect — Chrome will show a COM port picker\n4. Select your Arduino port`}
+                          {!arduinoSerial.isWebSerialAvailable()
+                            ? '\n\nWeb Serial is not available in this browser. Use Chrome or Edge on desktop.'
+                            : '\n\nWeb Serial is available in this browser.'}
                         </Text>
                       </View>
                     </View>
@@ -1183,6 +1229,7 @@ export function SettingsModal({ visible, onClose, connectionStatus, onConnect, o
                     </View>
                   )}
 
+                  {showServerPorts && (
                   <View style={styles.section}>
                     <View style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' }}>
                       <Text style={styles.sectionTitle}>Serial Ports (Server)</Text>
@@ -1224,6 +1271,7 @@ export function SettingsModal({ visible, onClose, connectionStatus, onConnect, o
                       </View>
                     )}
                   </View>
+                  )}
 
                   <View style={styles.section}>
                     <Text style={styles.sectionTitle}>Baud Rate</Text>

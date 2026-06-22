@@ -65,6 +65,7 @@ export function StartScreen({ connectionStatus, onConnect, onStart, onOpenSettin
   }));
 
   const isConnected = connectionStatus === 'connected';
+  const isWeb = Platform.OS === 'web';
   const heartSize = isNarrow ? 72 : 100;
   const heartIconSize = isNarrow ? 44 : 64;
   const titleSize = isNarrow ? 26 : 36;
@@ -150,8 +151,9 @@ export function StartScreen({ connectionStatus, onConnect, onStart, onOpenSettin
             />
             <Text style={[styles.connectText, { color: C.text }, isConnected && { color: C.feedbackGood }, connectionStatus === 'error' && { color: C.feedbackBad }]}>
               {connectionStatus === 'connecting' ? 'Connecting...' :
-               isConnected ? 'Arduino Connected' :
-               connectionStatus === 'error' ? 'Connection Failed — Retry' : 'Connect Arduino'}
+               isConnected ? (isWeb ? 'USB Connected' : 'Arduino Connected') :
+               connectionStatus === 'error' ? 'Connection Failed — Retry' :
+               isWeb ? 'Connect Arduino (USB)' : 'Connect Arduino'}
             </Text>
           </Pressable>
 

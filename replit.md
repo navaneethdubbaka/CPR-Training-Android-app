@@ -7,7 +7,7 @@ A tablet-optimized CPR training application that connects to Arduino via USB OTG
 - **Frontend**: Expo Router (file-based routing), React Native, responsive layout (phone + tablet, portrait + landscape)
 - **Backend**: Express.js on port 5000 (API + landing page)
 - **State Management**: React Context (CPRTrainingContext) for training state
-- **Hardware**: Dual connection modes — USB OTG (Android, primary) + WebSocket via backend (web/desktop, secondary)
+- **Hardware**: USB OTG (Android primary) + Web Serial USB (web primary) + optional WebSocket via backend
 - **Camera**: expo-camera for hand placement verification
 - **WebSocket**: Backend serves /ws/arduino for real-time sensor data streaming (secondary connection)
 - **USB Serial**: `react-native-usb-serialport-for-android` for direct USB OTG on Android (primary connection)
@@ -16,11 +16,14 @@ A tablet-optimized CPR training application that connects to Arduino via USB OTG
 1. **USB (OTG)** — Primary on Android. Arduino via USB OTG cable. `react-native-usb-serialport-for-android`. Requires custom dev build.
 2. **BLE (Bluetooth LE)** — Arduino with BLE module (HM-10, ESP32 BLE). `react-native-ble-plx`. Scans for UART service.
 3. **WiFi/TCP** — Arduino with ESP32, ESP8266, or Ethernet shield. `react-native-tcp-socket`. Telnet-style TCP on host:port.
-4. **Web Serial** — Chrome browser with USB Arduino. Native `navigator.serial` API. No package needed.
-5. **WebSocket (Server)** — Backend WebSocket `/ws/arduino`. Backend has real Arduino via `serialport`. For web/desktop testing.
+4. **Web Serial** — **Primary on web.** Chrome/Edge USB Arduino via `navigator.serial` API (`lib/webserial.ts`). Default connection mode on web.
+5. **WebSocket (Server)** — Manual option in web Settings. Backend WebSocket `/ws/arduino`. Backend has real Arduino via `serialport`.
 6. **Simulation** — Fallback when hardware-only mode is OFF and no hardware available.
 
-`PreferredConnection` setting: `'auto' | 'usb' | 'ble' | 'tcp' | 'webserial' | 'websocket'` — Auto tries USB → BLE → TCP → WebSocket.
+`PreferredConnection` setting: `'auto' | 'usb' | 'ble' | 'tcp' | 'webserial' | 'websocket'`
+
+- **Web default:** `webserial` (USB via Web Serial). Connect tries Web Serial first; WebSocket only when explicitly selected.
+- **Android default:** `auto` tries USB OTG → WebSocket → simulation.
 
 ## Key Components
 - `contexts/CPRTrainingContext.tsx` - Main training state management (exposes `hardwareOnly`, `connectionMode` state)

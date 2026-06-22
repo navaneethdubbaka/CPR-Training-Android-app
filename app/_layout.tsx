@@ -26,6 +26,7 @@ export default function RootLayout() {
   useEffect(() => {
     arduinoSerial.loadInverts().catch(() => {});
     arduinoSerial.loadOffsets().catch(() => {});
+    arduinoSerial.loadPreferences().catch(() => {});
     videoAssignments.load().catch(() => {});
     SplashScreen.hideAsync();
     if (Platform.OS === 'android') {

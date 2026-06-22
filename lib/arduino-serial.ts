@@ -11,6 +11,7 @@ const ULTRASONIC_OFFSET_KEY = 'cpr_ultrasonic_offset';
 const BREATH_OFFSET_KEY = 'cpr_breath_offset';
 const FORCE_OFFSET_KEY = 'cpr_force_offset';
 const FORCE_MIN_PEAK_KEY = 'cpr_force_min_peak';
+const PREFERRED_CONNECTION_KEY = 'cpr_preferred_connection';
 
 
 
@@ -116,6 +117,10 @@ export interface SensorInfo {
 export type ArduinoConnectionStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
 export type ArduinoConnectionMode = 'usb' | 'ble' | 'tcp' | 'webserial' | 'hardware' | 'simulation';
 export type PreferredConnection = 'auto' | 'usb' | 'ble' | 'tcp' | 'webserial' | 'websocket';
+
+const VALID_PREFERRED_CONNECTIONS: PreferredConnection[] = [
+  'auto', 'usb', 'ble', 'tcp', 'webserial', 'websocket',
+];
 
 export interface ArduinoConfig {
   baudRate: number;
@@ -233,7 +238,7 @@ class ArduinoSerialManager {
   private wsConnected = false;
   private mode: ArduinoConnectionMode = 'simulation';
   private _hardwareOnly = true;
-  private preferredConnection: PreferredConnection = 'auto';
+  private preferredConnection: PreferredConnection = Platform.OS === 'web' ? 'webserial' : 'auto';
   private availablePorts: AvailablePort[] = [];
   private usbDevices: UsbDevice[] = [];
   private bleDevices: BleDevice[] = [];
@@ -298,6 +303,36 @@ class ArduinoSerialManager {
 
   setPreferredConnection(pref: PreferredConnection) {
     this.preferredConnection = pref;
+    AsyncStorage.setItem(PREFERRED_CONNECTION_KEY, pref).catch(() => { });
+  }
+
+  async loadPreferences(): Promise<void> {
+    try {
+      const raw = await AsyncStorage.getItem(PREFERRED_CONNECTION_KEY);
+      if (raw && VALID_PREFERRED_CONNECTIONS.includes(raw as PreferredConnection)) {
+        this.preferredConnection = raw as PreferredConnection;
+      } else if (Platform.OS === 'web') {
+        this.preferredConnection = 'webserial';
+      }
+    } catch { }
+  }
+
+  private shouldUseWebSerial(pref: PreferredConnection): boolean {
+    if (Platform.OS !== 'web') return pref === 'webserial';
+    return pref === 'webserial' || pref === 'usb' || pref === 'auto';
+  }
+
+  private async fallbackSimulationOrError(): Promise<boolean> {
+    if (this._hardwareOnly) {
+      this.setStatus('error');
+      return false;
+    }
+    console.log('[Arduino] No hardware — simulation mode');
+    this.setMode('simulation');
+    await new Promise(r => setTimeout(r, 300));
+    this.setStatus('connected');
+    this.startSimulation();
+    return true;
   }
 
   selectUsbDevice(deviceId: number) {
@@ -1311,6 +1346,23 @@ class ArduinoSerialManager {
     this.setStatus('connecting');
     const pref = this.preferredConnection;
 
+    if (Platform.OS === 'web') {
+      if (this.shouldUseWebSerial(pref)) {
+        const ok = await this.connectWebSerialMode();
+        if (ok) return true;
+        return this.fallbackSimulationOrError();
+      }
+      if (pref === 'websocket') {
+        return this.connectWsFallback();
+      }
+      if (pref === 'tcp') {
+        const ok = await this.connectTcpMode();
+        if (ok) return true;
+        return this.fallbackSimulationOrError();
+      }
+      return this.fallbackSimulationOrError();
+    }
+
     if (pref === 'webserial') {
       const ok = await this.connectWebSerialMode();
       if (ok) return true;
@@ -1336,20 +1388,11 @@ class ArduinoSerialManager {
       console.log('[Arduino] USB OTG failed, trying next transport...');
     }
 
-    if (pref === 'auto' || (pref as string) === 'websocket') {
+    if (pref === 'auto') {
       return this.connectWsFallback();
     }
 
-    if (this._hardwareOnly) {
-      this.setStatus('error');
-      return false;
-    }
-
-    this.setMode('simulation');
-    await new Promise(r => setTimeout(r, 300));
-    this.setStatus('connected');
-    this.startSimulation();
-    return true;
+    return this.fallbackSimulationOrError();
   }
 
   private async connectWsFallback(): Promise<boolean> {

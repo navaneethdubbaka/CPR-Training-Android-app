@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, StyleSheet, Pressable } from 'react-native';
+import { View, Text, StyleSheet, Pressable, Platform } from 'react-native';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { getColors } from '@/constants/colors';
 import { useTheme } from '@/contexts/ThemeContext';
@@ -43,13 +43,17 @@ export function SensorStatus({ connectionStatus, hardwareOnly, connectionMode, o
   const Colors = getColors(theme);
   const isConnected = connectionStatus === 'connected';
   const isError = connectionStatus === 'error';
+  const isWeb = Platform.OS === 'web';
   const badge = connectionMode ? MODE_BADGE[connectionMode] : null;
+  const displayBadge = isWeb && connectionMode === 'webserial' && badge
+    ? { ...badge, label: 'USB' }
+    : badge;
   const iconName = (connectionMode ? MODE_ICON[connectionMode] : null) || 'usb-flash-drive-outline';
 
   const modeLabel = connectionMode === 'usb' ? 'USB'
     : connectionMode === 'ble' ? 'Bluetooth'
     : connectionMode === 'tcp' ? 'WiFi/TCP'
-    : connectionMode === 'webserial' ? 'Web Serial'
+    : connectionMode === 'webserial' ? (isWeb ? 'USB' : 'Web Serial')
     : connectionMode === 'hardware' ? 'WebSocket'
     : 'Simulation';
 
@@ -57,7 +61,7 @@ export function SensorStatus({ connectionStatus, hardwareOnly, connectionMode, o
   const statusText = connectionStatus === 'connecting' ? 'Connecting...'
     : isConnected ? `${modeLabel} Connected`
     : isError ? 'Connection Error'
-    : 'Connect Arduino';
+    : isWeb ? 'Connect Arduino (USB)' : 'Connect Arduino';
 
   const disconnectedBg = theme === 'light' ? 'rgba(10,22,40,0.08)' : Colors.surfaceLight;
 
@@ -78,9 +82,9 @@ export function SensorStatus({ connectionStatus, hardwareOnly, connectionMode, o
         <Text style={[styles.connectionText, { color: statusColor }]}>
           {statusText}
         </Text>
-        {isConnected && badge && (
-          <View style={[styles.hwBadge, { backgroundColor: badge.bg }]}>
-            <Text style={[styles.hwBadgeText, { color: badge.color }]}>{badge.label}</Text>
+        {isConnected && displayBadge && (
+          <View style={[styles.hwBadge, { backgroundColor: displayBadge.bg }]}>
+            <Text style={[styles.hwBadgeText, { color: displayBadge.color }]}>{displayBadge.label}</Text>
           </View>
         )}
         {hardwareOnly && !isConnected && !badge && (
