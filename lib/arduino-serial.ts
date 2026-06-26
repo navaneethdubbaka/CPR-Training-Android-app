@@ -1337,7 +1337,6 @@ class ArduinoSerialManager {
       }
       this.updateChannelsFromRaw(rawChannels);
       const sensorData = this.transformRawToSensorData(rawChannels);
-      console.log(sensorData)
       this.emit(sensorData);
     }
   }

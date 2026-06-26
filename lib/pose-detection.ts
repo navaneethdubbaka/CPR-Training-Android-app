@@ -4,6 +4,7 @@ import { useTensorflowModel } from 'react-native-fast-tflite';
 import { useRunOnJS } from 'react-native-worklets-core';
 import { useSharedValue } from 'react-native-reanimated';
 import { useFrameProcessor, runAtTargetFps, type Frame, type ReadonlyFrameProcessor } from 'react-native-vision-camera';
+import type { PoseCheckMode } from './cpr-pose-constants';
 import { analyzeCPRPosture, parseKeypointsFromFlat, type PoseKeypoint, type CPRPostureResult } from './pose-analysis';
 
 const INPUT_SIZE = 192;
@@ -43,17 +44,23 @@ export function usePoseDetector(
   enabled: boolean,
   onPostureResult: (keypoints: PoseKeypoint[], result: CPRPostureResult) => void,
   onInferenceTick?: () => void,
+  checkMode: PoseCheckMode = 'full_cpr',
+  onFrameSize?: (width: number, height: number) => void,
 ): PoseDetectorHook {
   const plugin = useTensorflowModel(LOCAL_MODEL);
   const modelReady = plugin.state === 'loaded';
   const lastErrorAt = useSharedValue<number>(0);
 
+  const handleFrameSize = useRunOnJS((width: number, height: number) => {
+    onFrameSize?.(width, height);
+  }, [onFrameSize]);
+
   const handleResult = useRunOnJS((flat: number[]) => {
     const kps = parseKeypointsFromFlat(flat);
-    const result = analyzeCPRPosture(kps);
+    const result = analyzeCPRPosture(kps, 'low_angle_45', checkMode);
     onInferenceTick?.();
     onPostureResult(kps, result);
-  }, [onPostureResult, onInferenceTick]);
+  }, [onPostureResult, onInferenceTick, checkMode]);
 
   const handleError = useRunOnJS((msg: string) => {
     console.warn('[PoseDetector] Frame inference error:', msg);
@@ -67,6 +74,7 @@ export function usePoseDetector(
       try {
         const model = plugin.model;
         if (model == null) return;
+        handleFrameSize(frame.width, frame.height);
         const buffer = frame.toArrayBuffer();
         const input = preprocessRGBFrame(buffer, frame.width, frame.height);
         const outputs = model.runSync([input]);
@@ -84,7 +92,7 @@ export function usePoseDetector(
         }
       }
     });
-  }, [plugin.model, plugin.state, enabled, handleResult, handleError, lastErrorAt]);
+  }, [plugin.model, plugin.state, enabled, handleResult, handleError, handleFrameSize, lastErrorAt]);
 
   return {
     state: plugin.state as PoseDetectorState,

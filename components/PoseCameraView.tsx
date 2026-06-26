@@ -7,11 +7,18 @@ import { getColors } from '@/constants/colors';
 import { useTheme } from '@/contexts/ThemeContext';
 import { usePoseDetector, type PoseKeypoint, type CPRPostureResult } from '@/lib/pose-detection';
 import { EMPTY_POSTURE_RESULT } from '@/lib/pose-analysis';
+import {
+  HAND_PLACEMENT_HOLD_MS,
+  isLowAnglePostureGood,
+  type PoseCheckMode,
+} from '@/lib/cpr-pose-constants';
 import { PoseSkeletonOverlay } from '@/components/PoseSkeletonOverlay';
-import type { PoseCheckMode } from '@/lib/cpr-pose-constants';
+import { PoseCueChips } from '@/components/PoseCueChips';
+import { usePoseVoiceCues } from '@/lib/use-pose-voice-cues';
+import { captureFrameSnapshot } from '@/lib/capture-frame-snapshot';
+import { sessionRecorder } from '@/lib/session-recorder';
 
 export const CAMERA_DEVICE_KEY = 'cpr_camera_device_id';
-const GOOD_QUALITY_HOLD_MS = 1500;
 
 interface Props {
   onHandDetected?: () => void;
@@ -33,22 +40,25 @@ export function PoseCameraView({
   showOverlay,
   overlayText,
   isPaused = false,
-  poseCheckMode: _poseCheckMode = 'full_cpr',
-  currentStepId: _currentStepId,
+  poseCheckMode = 'full_cpr',
+  currentStepId,
 }: Props) {
   const { theme } = useTheme();
   const Colors = getColors(theme);
   const { hasPermission, requestPermission } = useCameraPermission();
 
+  const cameraRef = useRef<Camera>(null);
+  const goodSinceRef = useRef<number | null>(null);
+  const handDetectedFiredRef = useRef(false);
+  const snapshotInFlightRef = useRef(false);
+  const [detectorKey, setDetectorKey] = useState(0);
+
   const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(null);
   const [keypoints, setKeypoints] = useState<PoseKeypoint[]>([]);
   const [postureResult, setPostureResult] = useState<CPRPostureResult>(EMPTY_POSTURE_RESULT);
   const [viewSize, setViewSize] = useState({ width: 0, height: 0 });
-  const [cameraFacing, setCameraFacing] = useState<'front' | 'back'>('back');
-  const [inferenceCount, setInferenceCount] = useState(0);
-
-  const goodSinceRef = useRef<number | null>(null);
-  const handDetectedFiredRef = useRef(false);
+  const [frameSize, setFrameSize] = useState({ width: 0, height: 0 });
+  const [cameraFacing, setCameraFacing] = useState<'front' | 'back'>('front');
 
   const allDevices = useCameraDevices();
   const backDevice = useCameraDevice('back');
@@ -71,41 +81,74 @@ export function PoseCameraView({
     });
   }, []);
 
+  useEffect(() => {
+    goodSinceRef.current = null;
+    handDetectedFiredRef.current = false;
+  }, [currentStepId, poseCheckMode]);
+
+  const captureSnapshotsIfNeeded = useCallback(async (stepId: string) => {
+    if (!sessionRecorder.shouldCaptureSnapshot(stepId)) return;
+    if (snapshotInFlightRef.current || !cameraRef.current) return;
+    snapshotInFlightRef.current = true;
+    try {
+      const photo = await cameraRef.current.takeSnapshot({ quality: 60 });
+      const dataUrl = await captureFrameSnapshot(photo.path);
+      sessionRecorder.tryCaptureGuaranteedSnapshot(stepId, dataUrl);
+      sessionRecorder.tryCaptureSnapshot(stepId, dataUrl);
+    } catch {
+      // Snapshot capture is best-effort during live training.
+    } finally {
+      snapshotInFlightRef.current = false;
+    }
+  }, []);
+
   const handlePostureResult = useCallback((kps: PoseKeypoint[], result: CPRPostureResult) => {
     setKeypoints(kps);
     setPostureResult(result);
     onPoseQuality?.(result.quality);
     onPostureResult?.(result);
 
-    if (isPaused) {
-      goodSinceRef.current = null;
-      handDetectedFiredRef.current = false;
-      return;
+    if (currentStepId) {
+      void captureSnapshotsIfNeeded(currentStepId);
     }
 
-    if (result.quality === 'good') {
+    if (isPaused || !enableHandTracking || !onHandDetected) return;
+    if (poseCheckMode !== 'full_cpr') return;
+
+    if (isLowAnglePostureGood(result)) {
       if (goodSinceRef.current === null) {
         goodSinceRef.current = Date.now();
-      } else if (!handDetectedFiredRef.current && Date.now() - goodSinceRef.current >= GOOD_QUALITY_HOLD_MS) {
+      } else if (!handDetectedFiredRef.current && Date.now() - goodSinceRef.current >= HAND_PLACEMENT_HOLD_MS) {
         handDetectedFiredRef.current = true;
-        onHandDetected?.();
+        onHandDetected();
       }
     } else {
       goodSinceRef.current = null;
       handDetectedFiredRef.current = false;
     }
-  }, [onHandDetected, onPoseQuality, onPostureResult, isPaused]);
+  }, [
+    onHandDetected,
+    onPoseQuality,
+    onPostureResult,
+    isPaused,
+    enableHandTracking,
+    poseCheckMode,
+    currentStepId,
+    captureSnapshotsIfNeeded,
+  ]);
+
+  const handleFrameSize = useCallback((width: number, height: number) => {
+    setFrameSize(prev => (prev.width === width && prev.height === height ? prev : { width, height }));
+  }, []);
 
   const detectorEnabled = enableHandTracking && !isPaused;
-
-  const handleInferenceTick = useCallback(() => {
-    setInferenceCount(c => c + 1);
-  }, []);
 
   const { state: modelState, frameProcessor } = usePoseDetector(
     detectorEnabled,
     handlePostureResult,
-    handleInferenceTick,
+    undefined,
+    poseCheckMode,
+    handleFrameSize,
   );
 
   const handleLayout = useCallback((e: { nativeEvent: { layout: { width: number; height: number } } }) => {
@@ -128,6 +171,24 @@ export function PoseCameraView({
     setSelectedDeviceId(nextDevice.id);
     await AsyncStorage.setItem(CAMERA_DEVICE_KEY, nextDevice.id);
   }, [allDevices, selectedDeviceId]);
+
+  const retryModel = useCallback(() => {
+    setDetectorKey(k => k + 1);
+  }, []);
+
+  const modelReady = modelState === 'loaded';
+  usePoseVoiceCues(
+    postureResult,
+    enableHandTracking && modelReady && !isPaused,
+    poseCheckMode,
+    currentStepId,
+  );
+
+  const qualityColor =
+    postureResult.quality === 'good' ? '#00E676' :
+    postureResult.quality === 'fair' ? '#FFD600' :
+    postureResult.quality === 'poor' ? '#E53935' :
+    Colors.textMuted;
 
   if (!hasPermission) {
     return (
@@ -154,29 +215,17 @@ export function PoseCameraView({
     );
   }
 
-  const modelReady = modelState === 'loaded';
-  const poseTracking = inferenceCount > 0;
-  const visibleJoints = keypoints.filter(kp => kp.score >= 0.1).length;
-
-  const statusLabel =
-    modelState === 'loading' ? 'Loading model…' :
-    modelState === 'error' ? 'Model error' :
-    !modelReady ? 'Model unavailable' :
-    !poseTracking ? 'Waiting for body…' :
-    `Tracking · ${visibleJoints} joints`;
-
-  const qualityColor =
-    postureResult.quality === 'good' ? '#00E676' :
-    postureResult.quality === 'fair' ? '#FFD600' :
-    postureResult.quality === 'poor' ? '#E53935' :
-    Colors.textMuted;
-
+  const videoWidth = frameSize.width || format?.videoWidth || 720;
+  const videoHeight = frameSize.height || format?.videoHeight || 480;
   const externalDevices = allDevices.filter(d => d.position === 'external');
   const hasExternalCameras = externalDevices.length > 0;
+  const mirrorX = cameraFacing === 'front' && !selectedDeviceId;
 
   return (
     <View style={styles.container} onLayout={handleLayout}>
       <Camera
+        key={`${activeDevice.id}-${detectorKey}`}
+        ref={cameraRef}
         style={StyleSheet.absoluteFillObject}
         device={activeDevice}
         format={format}
@@ -193,46 +242,56 @@ export function PoseCameraView({
             result={postureResult}
             width={viewSize.width}
             height={viewSize.height}
+            videoWidth={videoWidth}
+            videoHeight={videoHeight}
             Colors={Colors}
-            mirrorX={cameraFacing === 'front'}
+            mirrorX={mirrorX}
+            displayMode="cpr_triangle"
+            poseCheckMode={poseCheckMode}
           />
         </View>
       )}
 
       {enableHandTracking && (
         <View style={styles.feedbackPanel}>
-          <View style={styles.feedbackRow}>
-            {!modelReady && <ActivityIndicator size="small" color="#FFD600" />}
-            <Text style={[styles.feedbackText, { color: '#FFD600' }]}>
-              {statusLabel}
-            </Text>
-          </View>
-          {modelReady && poseTracking && (
+          {!modelReady ? (
+            <View style={styles.modelStatusBlock}>
+              {modelState === 'loading' ? (
+                <View style={styles.feedbackRow}>
+                  <ActivityIndicator size="small" color="#FFD600" />
+                  <Text style={[styles.feedbackText, { color: '#FFD600' }]}>
+                    Loading pose model…
+                  </Text>
+                </View>
+              ) : (
+                <>
+                  <Text style={[styles.feedbackText, { color: '#E53935' }]}>
+                    Model unavailable
+                  </Text>
+                  <Pressable style={styles.retryBtn} onPress={retryModel}>
+                    <Text style={styles.retryBtnText}>Retry model load</Text>
+                  </Pressable>
+                </>
+              )}
+            </View>
+          ) : (
             <>
-              <View style={styles.feedbackRow}>
-                <Text style={[styles.feedbackText, { color: postureResult.armsAreStraight ? '#00E676' : '#E53935' }]}>
-                  Arms {postureResult.armsAreStraight ? 'STRAIGHT ✓' : 'bent — straighten ✗'}
-                </Text>
-              </View>
-              <View style={styles.feedbackRow}>
-                <Text style={[styles.feedbackText, { color: postureResult.shouldersOverWrists ? '#00E676' : '#E53935' }]}>
-                  Position {postureResult.shouldersOverWrists ? 'GOOD ✓' : '— lean forward ✗'}
-                </Text>
-              </View>
+              <PoseCueChips
+                result={postureResult}
+                Colors={Colors}
+                compact
+                checkMode={poseCheckMode}
+                stepId={currentStepId}
+              />
               {postureResult.tips.length > 0 && (
                 <View style={styles.feedbackRow}>
                   <MaterialCommunityIcons name="lightbulb-on-outline" size={14} color="#FFD600" />
                   <Text style={[styles.tipsText, { color: '#FFD600' }]}>
-                    {postureResult.tips.join(' · ')}
+                    {postureResult.tips[0]}
                   </Text>
                 </View>
               )}
             </>
-          )}
-          {modelReady && !poseTracking && (
-            <Text style={[styles.tipsText, { color: Colors.textSecondary }]}>
-              Stand back so shoulders, arms, and hands are in frame
-            </Text>
           )}
         </View>
       )}
@@ -242,7 +301,7 @@ export function PoseCameraView({
           <View style={[styles.qualityDot, { backgroundColor: qualityColor }]} />
           <Text style={[styles.qualityText, { color: qualityColor }]}>
             {postureResult.quality === 'good' ? 'CORRECT POSTURE' :
-             postureResult.quality === 'fair' ? 'ADJUST ARMS' : 'FIX POSTURE'}
+             postureResult.quality === 'fair' ? 'ADJUST POSTURE' : 'FIX POSTURE'}
           </Text>
         </View>
       )}
@@ -268,12 +327,10 @@ export function PoseCameraView({
         <MaterialCommunityIcons
           name="eye-circle"
           size={10}
-          color={poseTracking ? '#00E676' : modelState === 'loading' ? '#FFD600' : Colors.textMuted}
+          color={modelReady ? '#00E676' : Colors.textMuted}
         />
         <Text style={[styles.badgeText, { color: Colors.text }]}>
-          {modelState === 'loading' ? 'POSE · …' :
-           modelState === 'error' ? 'POSE · ERR' :
-           poseTracking ? 'POSE · ON' : 'POSE · idle'}
+          POSE
         </Text>
       </View>
     </View>
@@ -317,13 +374,30 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: 8,
     left: 8,
-    gap: 4,
+    gap: 6,
     backgroundColor: 'rgba(0,0,0,0.7)',
     borderRadius: 10,
     paddingHorizontal: 12,
     paddingVertical: 8,
+    maxWidth: '95%',
     zIndex: 30,
     elevation: 30,
+  },
+  modelStatusBlock: {
+    gap: 6,
+  },
+  retryBtn: {
+    alignSelf: 'flex-start',
+    backgroundColor: 'rgba(229,57,53,0.35)',
+    borderRadius: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    marginTop: 2,
+  },
+  retryBtnText: {
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: '700',
   },
   feedbackRow: {
     flexDirection: 'row',

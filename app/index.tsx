@@ -26,7 +26,7 @@ import { StepVideo } from '@/components/StepVideo';
 import type { CPRPostureResult } from '@/lib/pose-analysis';
 import { FRAMING_HOLD_MS, getPoseCheckModeForStep, isFramingGateReady } from '@/lib/cpr-pose-constants';
 
-const ENABLE_POSE_VOICE_CUES = Platform.OS === 'web';
+const ENABLE_POSE_VOICE_CUES = true;
 
 export default function TrainingScreen() {
   const [showSettings, setShowSettings] = useState(false);
@@ -83,7 +83,7 @@ export default function TrainingScreen() {
   }, [currentStepIndex]);
 
   useEffect(() => {
-    const poseFramingRequired = showPoseTracking && Platform.OS === 'web';
+    const poseFramingRequired = showPoseTracking;
     if (!poseFramingRequired || isAedStep(currentStepId)) {
       setFramingGateOpen(true);
       framingSinceRef.current = null;
@@ -209,7 +209,7 @@ useEffect(() => {
   }, [currentStep, sensorData, stepTimer, handPlacementVerified, cyclePhase, cycleCompressionCount, cycleBreathCount, completedCycles, totalCycles, postShockCyclePhase, postShockCycleCompressionCount, postShockCycleBreathCount, postShockCompletedCycles, postShockTotalCycles]);
 
   const showAED = isAedStep(currentStepId);
-  const framingBlocked = Platform.OS === 'web' && showPoseTracking && !framingGateOpen;
+  const framingBlocked = showPoseTracking && !framingGateOpen;
   const showPostShockCycles = currentStep?.id === 'post_aed_compressions';
   const showCycleTracker = currentStepId === 'compressions' || currentStepId === 'post_aed_compressions';
   const activeCyclePhase = showPostShockCycles ? postShockCyclePhase : cyclePhase;

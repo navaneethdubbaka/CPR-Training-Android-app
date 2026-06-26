@@ -83,7 +83,6 @@ function SetIndicator({
       <View style={setStyles.dots}>
         {Array.from({ length: setsRequired }).map((_, i) => {
           const set = sets[i];
-          console.log(set)
           const isActive = i === currentSetIndex;
           const isComplete = set?.complete;
           const isPassed = set?.passed;

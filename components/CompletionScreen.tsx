@@ -1,5 +1,7 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, Pressable, ScrollView, Platform, Image } from 'react-native';
+import { View, Text, StyleSheet, Pressable, ScrollView, Platform, Image, Alert } from 'react-native';
+import * as FileSystem from 'expo-file-system/legacy';
+import * as Sharing from 'expo-sharing';
 import Animated, { useSharedValue, useAnimatedStyle, withTiming, withDelay, withSpring } from 'react-native-reanimated';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -119,25 +121,49 @@ export function CompletionScreen({
   const compressionsMet = totalCompressions >= compressionTarget;
   const breathsMet = totalBreaths >= breathTarget;
 
-  const handleDownloadReport = () => {
-    if (Platform.OS !== 'web' || typeof document === 'undefined') return;
-    const report = sessionRecorder.exportReport({
-      overallScore,
-      sessionAnalytics,
-      elapsedTime,
-      totalCompressions,
-      totalBreaths,
-      compressionTarget,
-      breathTarget,
-      trainingMode,
-    });
-    const blob = new Blob([report], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `cpr-session-${Date.now()}.json`;
-    link.click();
-    URL.revokeObjectURL(url);
+  const buildReportJson = () => sessionRecorder.exportReport({
+    overallScore,
+    sessionAnalytics,
+    elapsedTime,
+    totalCompressions,
+    totalBreaths,
+    compressionTarget,
+    breathTarget,
+    trainingMode,
+  });
+
+  const handleDownloadReport = async () => {
+    const report = buildReportJson();
+    const filename = `cpr-session-${Date.now()}.json`;
+
+    if (Platform.OS === 'web' && typeof document !== 'undefined') {
+      const blob = new Blob([report], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename;
+      link.click();
+      URL.revokeObjectURL(url);
+      return;
+    }
+
+    try {
+      const path = `${FileSystem.cacheDirectory}${filename}`;
+      await FileSystem.writeAsStringAsync(path, report, {
+        encoding: FileSystem.EncodingType.UTF8,
+      });
+      const canShare = await Sharing.isAvailableAsync();
+      if (!canShare) {
+        Alert.alert('Export saved', `Report saved to ${path}`);
+        return;
+      }
+      await Sharing.shareAsync(path, {
+        mimeType: 'application/json',
+        dialogTitle: 'Download CPR Session Report',
+      });
+    } catch {
+      Alert.alert('Export failed', 'Could not save or share the session report.');
+    }
   };
 
   return (
@@ -284,15 +310,13 @@ export function CompletionScreen({
           )}
         </View>
 
-      {Platform.OS === 'web' && (
-        <Pressable
-          style={({ pressed }) => [styles.downloadBtn, { backgroundColor: Colors.surface, borderColor: Colors.border }, pressed && { opacity: 0.8 }]}
-          onPress={handleDownloadReport}
-        >
-          <MaterialCommunityIcons name="download" size={20} color={Colors.info} />
-          <Text style={[styles.downloadText, { color: Colors.info }]}>Download Report (JSON)</Text>
-        </Pressable>
-      )}
+      <Pressable
+        style={({ pressed }) => [styles.downloadBtn, { backgroundColor: Colors.surface, borderColor: Colors.border }, pressed && { opacity: 0.8 }]}
+        onPress={() => void handleDownloadReport()}
+      >
+        <MaterialCommunityIcons name="download" size={20} color={Colors.info} />
+        <Text style={[styles.downloadText, { color: Colors.info }]}>Download Report (JSON)</Text>
+      </Pressable>
 
       <Pressable
         style={({ pressed }) => [styles.restartBtn, { backgroundColor: Colors.accent }, pressed && { opacity: 0.8 }]}

@@ -87,6 +87,16 @@ class SessionRecorder {
     this.loggedChipFailures.delete(`${stepId}:${chipId}`);
   }
 
+  shouldCaptureSnapshot(stepId: string): boolean {
+    const cprCameraSteps = new Set(['hand_placement', 'compressions', 'post_aed_compressions']);
+    if (!this.guaranteedSnapshotTaken && cprCameraSteps.has(stepId)) return true;
+    if (this.nextSnapshotIdx < this.snapshotSchedule.length
+      && Date.now() >= this.snapshotSchedule[this.nextSnapshotIdx]) {
+      return true;
+    }
+    return false;
+  }
+
   tryCaptureGuaranteedSnapshot(stepId: string, dataUrl: string | null): void {
     if (!dataUrl || this.guaranteedSnapshotTaken) return;
     const cprCameraSteps = new Set(['hand_placement', 'compressions', 'post_aed_compressions']);
