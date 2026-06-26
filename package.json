@@ -82,6 +82,7 @@
     "react-native-worklets-core": "^1.6.3",
     "serialport": "^13.0.0",
     "tsx": "^4.20.6",
+    "vision-camera-resize-plugin": "^3.2.0",
     "ws": "^8.19.0",
     "zod": "^3.24.2",
     "zod-validation-error": "^3.4.0"

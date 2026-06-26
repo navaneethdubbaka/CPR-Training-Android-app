@@ -10,6 +10,7 @@ import {
   POSE_CONF_DEFAULT,
   POSE_CONF_EAR,
   POSE_CONF_NOSE,
+  type FramingZone,
   type PoseAnalysisProfile,
   type PoseCheckMode,
   TRIANGLE_ELBOW_LINE_MAX_DIST,
@@ -125,7 +126,7 @@ function pointToSegmentDist(
   return Math.hypot(px - projX, py - projY);
 }
 
-function checkFraming(keypoints: PoseKeypoint[]): boolean {
+function checkFraming(keypoints: PoseKeypoint[], zone: FramingZone): boolean {
   const le = keypoints[KP.LEFT_EAR];
   const re = keypoints[KP.RIGHT_EAR];
   const ls = keypoints[KP.LEFT_SHOULDER];
@@ -135,24 +136,24 @@ function checkFraming(keypoints: PoseKeypoint[]): boolean {
 
   const earsOk =
     le.score > POSE_CONF_EAR && re.score > POSE_CONF_EAR &&
-    isInsideZone(le.x, le.y, LOW_ANGLE_FRAMING_ZONE) &&
-    isInsideZone(re.x, re.y, LOW_ANGLE_FRAMING_ZONE);
+    isInsideZone(le.x, le.y, zone) &&
+    isInsideZone(re.x, re.y, zone);
 
   const shouldersOk =
     ls.score > POSE_CONF_DEFAULT && rs.score > POSE_CONF_DEFAULT &&
-    isInsideZone(ls.x, ls.y, LOW_ANGLE_FRAMING_ZONE) &&
-    isInsideZone(rs.x, rs.y, LOW_ANGLE_FRAMING_ZONE);
+    isInsideZone(ls.x, ls.y, zone) &&
+    isInsideZone(rs.x, rs.y, zone);
 
   const wristsOk =
     lw.score > POSE_CONF_DEFAULT && rw.score > POSE_CONF_DEFAULT &&
-    isInsideZone(lw.x, lw.y, LOW_ANGLE_FRAMING_ZONE) &&
-    isInsideZone(rw.x, rw.y, LOW_ANGLE_FRAMING_ZONE);
+    isInsideZone(lw.x, lw.y, zone) &&
+    isInsideZone(rw.x, rw.y, zone);
 
   return earsOk && shouldersOk && wristsOk;
 }
 
 /** Steps 1–3: head + shoulders in frame, no wrists required. */
-function checkFramingLite(keypoints: PoseKeypoint[]): boolean {
+function checkFramingLite(keypoints: PoseKeypoint[], zone: FramingZone): boolean {
   const nose = keypoints[KP.NOSE];
   const le = keypoints[KP.LEFT_EAR];
   const re = keypoints[KP.RIGHT_EAR];
@@ -161,17 +162,17 @@ function checkFramingLite(keypoints: PoseKeypoint[]): boolean {
 
   const shouldersOk =
     ls.score > POSE_CONF_DEFAULT && rs.score > POSE_CONF_DEFAULT &&
-    isInsideZone(ls.x, ls.y, LOW_ANGLE_FRAMING_ZONE) &&
-    isInsideZone(rs.x, rs.y, LOW_ANGLE_FRAMING_ZONE);
+    isInsideZone(ls.x, ls.y, zone) &&
+    isInsideZone(rs.x, rs.y, zone);
 
   const bothEarsOk =
     le.score > POSE_CONF_EAR && re.score > POSE_CONF_EAR &&
-    isInsideZone(le.x, le.y, LOW_ANGLE_FRAMING_ZONE) &&
-    isInsideZone(re.x, re.y, LOW_ANGLE_FRAMING_ZONE);
+    isInsideZone(le.x, le.y, zone) &&
+    isInsideZone(re.x, re.y, zone);
 
   const noseOk =
     nose.score > POSE_CONF_NOSE &&
-    isInsideZone(nose.x, nose.y, LOW_ANGLE_FRAMING_ZONE);
+    isInsideZone(nose.x, nose.y, zone);
 
   const headOk = bothEarsOk || noseOk;
   return shouldersOk && headOk;
@@ -261,12 +262,12 @@ function buildLowAngleTips(
   return tips;
 }
 
-function analyzeFramingOnly(keypoints: PoseKeypoint[]): CPRPostureResult {
+function analyzeFramingOnly(keypoints: PoseKeypoint[], zone: FramingZone): CPRPostureResult {
   const nose = keypoints[KP.NOSE];
   const leEar = keypoints[KP.LEFT_EAR];
   const reEar = keypoints[KP.RIGHT_EAR];
 
-  const framingOk = checkFramingLite(keypoints);
+  const framingOk = checkFramingLite(keypoints, zone);
   const lookingDown = checkLookingDownLite(nose, leEar, reEar);
   const tips = buildLowAngleTips({
     framingOk,
@@ -358,9 +359,13 @@ function analyzeLegacy(keypoints: PoseKeypoint[]): CPRPostureResult {
   };
 }
 
-function analyzeLowAngle45(keypoints: PoseKeypoint[], mode: PoseCheckMode): CPRPostureResult {
+function analyzeLowAngle45(
+  keypoints: PoseKeypoint[],
+  mode: PoseCheckMode,
+  zone: FramingZone,
+): CPRPostureResult {
   if (mode === 'framing_only') {
-    return analyzeFramingOnly(keypoints);
+    return analyzeFramingOnly(keypoints, zone);
   }
 
   const nose = keypoints[KP.NOSE];
@@ -373,7 +378,7 @@ function analyzeLowAngle45(keypoints: PoseKeypoint[], mode: PoseCheckMode): CPRP
   const lw = keypoints[KP.LEFT_WRIST];
   const rw = keypoints[KP.RIGHT_WRIST];
 
-  const framingOk = checkFraming(keypoints);
+  const framingOk = checkFraming(keypoints, zone);
 
   const earsVisible =
     leEar.score > POSE_CONF_EAR && reEar.score > POSE_CONF_EAR;
@@ -441,7 +446,7 @@ function analyzeLowAngle45(keypoints: PoseKeypoint[], mode: PoseCheckMode): CPRP
   };
 }
 
-export function parseKeypointsFromFlat(flat: number[]): PoseKeypoint[] {
+export function parseKeypointsFromFlat(flat: number[], flipX = false): PoseKeypoint[] {
   const kps: PoseKeypoint[] = [];
   for (let i = 0; i < 17; i++) {
     kps.push({
@@ -462,8 +467,10 @@ export function parseKeypointsFromFlat(flat: number[]): PoseKeypoint[] {
     if (score > 1) {
       score = 1 / (1 + Math.exp(-score));
     }
+    let x = Math.min(1, Math.max(0, k.x / scale));
+    if (flipX) x = 1 - x;
     return {
-      x: Math.min(1, Math.max(0, k.x / scale)),
+      x,
       y: Math.min(1, Math.max(0, k.y / scale)),
       score: Math.min(1, Math.max(0, score)),
     };
@@ -474,13 +481,14 @@ export function analyzeCPRPosture(
   keypoints: PoseKeypoint[],
   profile: PoseAnalysisProfile = 'legacy',
   checkMode: PoseCheckMode = 'full_cpr',
+  framingZone: FramingZone = LOW_ANGLE_FRAMING_ZONE,
 ): CPRPostureResult {
   if (keypoints.length < 17) {
     return { ...EMPTY_POSTURE_RESULT };
   }
 
   if (profile === 'low_angle_45') {
-    return analyzeLowAngle45(keypoints, checkMode);
+    return analyzeLowAngle45(keypoints, checkMode, framingZone);
   }
   return analyzeLegacy(keypoints);
 }

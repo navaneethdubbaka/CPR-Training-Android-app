@@ -44,6 +44,7 @@ export default function TrainingScreen() {
   const isLandscape = screenWidth > screenHeight;
   const isNarrow = screenWidth < 600;
   const useSideBySide = isLandscape && screenWidth >= 600;
+  const portraitCameraHeight = Math.round(screenHeight * 0.5);
 
   const {
     mode, setMode,
@@ -306,23 +307,23 @@ useEffect(() => {
     ? 'Live pose tracking'
     : '';
 
-  const renderVisualPanel = () => (
-    <View style={[useSideBySide ? styles.panel : styles.stackedPanel]}>
-      {showVisualCamera && (
-        <View style={styles.cameraContainer}>
-          <CameraViewComponent
-            showOverlay={!!cameraOverlayText}
-            overlayText={cameraOverlayText}
-            onHandDetected={currentStep?.id === 'hand_placement' ? verifyHandPlacement : undefined}
-            onPostureResult={setPostureResult}
-            enableHandTracking={showPoseTracking}
-            isPaused={isPaused}
-            poseCheckMode={poseCheckMode ?? 'full_cpr'}
-            currentStepId={currentStepId}
-          />
-        </View>
-      )}
+  const renderCameraBlock = (containerStyle?: object) => (
+    <View style={[styles.cameraContainer, containerStyle]}>
+      <CameraViewComponent
+        showOverlay={!!cameraOverlayText}
+        overlayText={cameraOverlayText}
+        onHandDetected={currentStep?.id === 'hand_placement' ? verifyHandPlacement : undefined}
+        onPostureResult={setPostureResult}
+        enableHandTracking={showPoseTracking}
+        isPaused={isPaused}
+        poseCheckMode={poseCheckMode ?? 'full_cpr'}
+        currentStepId={currentStepId}
+      />
+    </View>
+  );
 
+  const renderVisualExtras = () => (
+    <>
       {showAED && (
         <AEDPanel
           upperPadPlaced={sensorData.touchSensors.aedPadUpper}
@@ -353,6 +354,13 @@ useEffect(() => {
           <Text style={styles.hardwareMessageText}>Connect Arduino hardware to receive sensor data</Text>
         </View>
       )}
+    </>
+  );
+
+  const renderVisualPanel = () => (
+    <View style={[useSideBySide ? styles.panel : styles.stackedPanel]}>
+      {showVisualCamera && renderCameraBlock()}
+      {renderVisualExtras()}
     </View>
   );
 
@@ -457,8 +465,13 @@ useEffect(() => {
           touchSensors={sensorData.touchSensors}
         />
       </View>
+      {showVisualCamera && (
+        <View style={[styles.portraitCameraHero, { height: portraitCameraHeight }]}>
+          {renderCameraBlock(styles.cameraContainerPortrait)}
+        </View>
+      )}
       <ScrollView style={styles.scrollContent} contentContainerStyle={styles.scrollInner} showsVerticalScrollIndicator={false}>
-        {renderVisualPanel()}
+        {renderVisualExtras()}
         {renderInfoPanel()}
       </ScrollView>
     </View>
@@ -505,6 +518,17 @@ function makeStyles(Colors: ReturnType<typeof getColors>) {
     cameraContainer: {
       flex: 1,
       minHeight: 180,
+    },
+    portraitCameraHero: {
+      width: '100%',
+      borderRadius: 12,
+      overflow: 'hidden',
+      marginBottom: 8,
+    },
+    cameraContainerPortrait: {
+      flex: 1,
+      width: '100%',
+      minHeight: undefined,
     },
     placeholderPanel: {
       flex: 1,

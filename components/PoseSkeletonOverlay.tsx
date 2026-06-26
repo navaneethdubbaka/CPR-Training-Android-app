@@ -12,12 +12,28 @@ import {
   CPR_GUIDE_CONNECTIONS,
   CPR_TRIANGLE_CONNECTIONS,
   CPR_TRIANGLE_KEYPOINT_INDICES,
-  LOW_ANGLE_FRAMING_ZONE,
+  getFramingZone,
+  type FramingZone,
   type PoseCheckMode,
 } from '@/lib/cpr-pose-constants';
 import { videoNormToViewPx } from '@/lib/video-view-mapping';
 
-export const STERNAL_ZONE = LOW_ANGLE_FRAMING_ZONE;
+export const STERNAL_ZONE = getFramingZone('web', 1, 1);
+
+const FRAMING_KEYPOINT_INDICES: number[] = [
+  KP.NOSE,
+  KP.LEFT_EAR,
+  KP.RIGHT_EAR,
+  KP.LEFT_SHOULDER,
+  KP.RIGHT_SHOULDER,
+];
+
+const FRAMING_CONNECTIONS: [number, number][] = [
+  [KP.LEFT_EAR, KP.RIGHT_EAR],
+  [KP.LEFT_SHOULDER, KP.RIGHT_SHOULDER],
+  [KP.LEFT_EAR, KP.LEFT_SHOULDER],
+  [KP.RIGHT_EAR, KP.RIGHT_SHOULDER],
+];
 
 const DRAW_SCORE_MIN = 0.1;
 const CPR_STROKE = Platform.OS === 'android' ? 5 : 3;
@@ -39,6 +55,7 @@ interface Props {
   videoHeight?: number;
   displayMode?: PoseOverlayDisplayMode;
   poseCheckMode?: PoseCheckMode;
+  framingZone?: FramingZone;
 }
 
 function bonePath(x1: number, y1: number, x2: number, y2: number): string {
@@ -112,18 +129,27 @@ function JointDots({
     videoNormToViewPx(x, y, videoWidth ?? 0, videoHeight ?? 0, width, height, mirrorX);
 
   if (displayMode === 'frame_only') {
-    const nose = keypoints[KP.NOSE];
-    if (!nose || nose.score < DRAW_SCORE_MIN) return null;
-    const pos = toPx(nose.x, nose.y);
     return (
       <View style={StyleSheet.absoluteFill} pointerEvents="none">
-        <RingDot
-          left={pos.px}
-          top={pos.py}
-          outer={EAR_RING_OUTER}
-          inner={EAR_RING_INNER}
-          ringColor={boneColor}
-        />
+        {FRAMING_KEYPOINT_INDICES.map(i => {
+          const kp = keypoints[i];
+          if (!kp || kp.score < DRAW_SCORE_MIN) return null;
+          const isEar = i === KP.LEFT_EAR || i === KP.RIGHT_EAR;
+          const isShoulder = i === KP.LEFT_SHOULDER || i === KP.RIGHT_SHOULDER;
+          const outer = isEar ? EAR_RING_OUTER : isShoulder ? RING_OUTER : EAR_RING_OUTER;
+          const inner = isEar ? EAR_RING_INNER : isShoulder ? RING_INNER : EAR_RING_INNER;
+          const pos = toPx(kp.x, kp.y);
+          return (
+            <RingDot
+              key={`framing-dot-${i}`}
+              left={pos.px}
+              top={pos.py}
+              outer={outer}
+              inner={inner}
+              ringColor={boneColor}
+            />
+          );
+        })}
       </View>
     );
   }
@@ -170,6 +196,7 @@ export function PoseSkeletonOverlay({
   videoHeight,
   displayMode = 'full',
   poseCheckMode = 'full_cpr',
+  framingZone,
 }: Props) {
   if (!width || !height) return null;
 
@@ -186,7 +213,11 @@ export function PoseSkeletonOverlay({
   const px = (x: number, y: number) => toPx(x, y).px;
   const py = (x: number, y: number) => toPx(x, y).py;
 
-  const zone = LOW_ANGLE_FRAMING_ZONE;
+  const zone: FramingZone =
+    framingZone ??
+    (Platform.OS === 'android'
+      ? getFramingZone('android', width, height)
+      : getFramingZone('web', width, height));
   const zoneX = zone.x * width;
   const zoneY = zone.y * height;
   const zoneW = zone.w * width;
@@ -200,7 +231,11 @@ export function PoseSkeletonOverlay({
     result.quality === 'good' ? '#00E676' :
     result.quality === 'fair' ? '#FFD600' : '#E53935';
 
-  const connections = isFrameOnly ? [] : isTriangleMode ? CPR_TRIANGLE_CONNECTIONS : SKELETON_CONNECTIONS;
+  const connections = isFrameOnly
+    ? FRAMING_CONNECTIONS
+    : isTriangleMode
+    ? CPR_TRIANGLE_CONNECTIONS
+    : SKELETON_CONNECTIONS;
   const guideConnections = isTriangleMode && result.elbowBent ? CPR_GUIDE_CONNECTIONS : [];
 
   const lineColor = (a: number, b: number, isGuide = false): string => {

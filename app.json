@@ -84,9 +84,11 @@
         "react-native-vision-camera",
         {
           "cameraPermissionText": "Camera is used to track arm position during CPR training",
-          "enableMicrophonePermission": false
+          "enableMicrophonePermission": false,
+          "enableFrameProcessors": true
         }
-      ]
+      ],
+      "react-native-fast-tflite"
     ],
     "experiments": {
       "typedRoutes": true,

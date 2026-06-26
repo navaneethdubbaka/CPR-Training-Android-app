@@ -1,117 +1,80 @@
 export * from './pose-analysis';
 
-import { useTensorflowModel } from 'react-native-fast-tflite';
-import { useRunOnJS } from 'react-native-worklets-core';
-import { useSharedValue } from 'react-native-reanimated';
-import { useFrameProcessor, runAtTargetFps, type Frame, type ReadonlyFrameProcessor } from 'react-native-vision-camera';
-import type { PoseCheckMode } from './cpr-pose-constants';
-import { analyzeCPRPosture, parseKeypointsFromFlat, type PoseKeypoint, type CPRPostureResult } from './pose-analysis';
+import type { Frame, Orientation } from 'react-native-vision-camera';
+import type { Options as ResizeOptions } from 'vision-camera-resize-plugin';
+import { parseKeypointsFromFlat, type PoseKeypoint } from './pose-analysis';
 
-const INPUT_SIZE = 192;
-
-function preprocessRGBFrame(buffer: ArrayBuffer, srcW: number, srcH: number): Uint8Array {
-  'worklet';
-  const src = new Uint8Array(buffer);
-  const dst = new Uint8Array(INPUT_SIZE * INPUT_SIZE * 3);
-  const scaleX = srcW / INPUT_SIZE;
-  const scaleY = srcH / INPUT_SIZE;
-  for (let y = 0; y < INPUT_SIZE; y++) {
-    for (let x = 0; x < INPUT_SIZE; x++) {
-      const sx = Math.floor(x * scaleX);
-      const sy = Math.floor(y * scaleY);
-      const si = (sy * srcW + sx) * 3;
-      const di = (y * INPUT_SIZE + x) * 3;
-      dst[di] = src[si];
-      dst[di + 1] = src[si + 1];
-      dst[di + 2] = src[si + 2];
-    }
-  }
-  return dst;
-}
-
-const LOCAL_MODEL = require('../assets/models/movenet_lightning.tflite');
+export const MOVENET_MODEL = require('../assets/models/movenet_lightning.tflite');
+export const POSE_INPUT_SIZE = 192;
 
 export type PoseDetectorState = 'loading' | 'loaded' | 'error';
 
-export interface PoseDetectorHook {
-  state: PoseDetectorState;
-  frameProcessor: ReadonlyFrameProcessor | undefined;
+export interface FrameMeta {
+  width: number;
+  height: number;
+  orientation: Orientation;
+  mirrored: boolean;
 }
 
-const ERROR_LOG_INTERVAL_MS = 5000;
+export function orientationToRotation(
+  orientation: Orientation,
+): ResizeOptions<'uint8'>['rotation'] {
+  'worklet';
+  switch (orientation) {
+    case 'landscape-left':
+      return '90deg';
+    case 'landscape-right':
+      return '270deg';
+    case 'portrait-upside-down':
+      return '180deg';
+    default:
+      return '0deg';
+  }
+}
 
-export function usePoseDetector(
-  enabled: boolean,
-  onPostureResult: (keypoints: PoseKeypoint[], result: CPRPostureResult) => void,
-  onInferenceTick?: () => void,
-  checkMode: PoseCheckMode = 'full_cpr',
-  onFrameSize?: (width: number, height: number) => void,
-): PoseDetectorHook {
-  const plugin = useTensorflowModel(LOCAL_MODEL);
-  const modelReady = plugin.state === 'loaded';
-  const lastErrorAt = useSharedValue<number>(0);
+function isSidewaysOrientation(orientation: Orientation): boolean {
+  'worklet';
+  return orientation === 'landscape-left' || orientation === 'landscape-right';
+}
 
-  const handleFrameSize = useRunOnJS((width: number, height: number) => {
-    onFrameSize?.(width, height);
-  }, [onFrameSize]);
-
-  const handleResult = useRunOnJS((flat: number[]) => {
-    const kps = parseKeypointsFromFlat(flat);
-    const result = analyzeCPRPosture(kps, 'low_angle_45', checkMode);
-    onInferenceTick?.();
-    onPostureResult(kps, result);
-  }, [onPostureResult, onInferenceTick, checkMode]);
-
-  const handleError = useRunOnJS((msg: string) => {
-    console.warn('[PoseDetector] Frame inference error:', msg);
-  }, []);
-
-  const frameProcessor = useFrameProcessor((frame) => {
-    'worklet';
-    if (!enabled) return;
-    runAtTargetFps(7, () => {
-      'worklet';
-      try {
-        const model = plugin.model;
-        if (model == null) return;
-        handleFrameSize(frame.width, frame.height);
-        const buffer = frame.toArrayBuffer();
-        const input = preprocessRGBFrame(buffer, frame.width, frame.height);
-        const outputs = model.runSync([input]);
-        const raw = outputs[0];
-        const arr: number[] = [];
-        for (let i = 0; i < 51; i++) {
-          arr.push(Number((raw as Float32Array | Uint8Array)[i] ?? 0));
-        }
-        handleResult(arr);
-      } catch (e) {
-        const now = Date.now();
-        if (now - lastErrorAt.value > ERROR_LOG_INTERVAL_MS) {
-          lastErrorAt.value = now;
-          handleError(String(e));
-        }
-      }
-    });
-  }, [plugin.model, plugin.state, enabled, handleResult, handleError, handleFrameSize, lastErrorAt]);
-
+export function buildResizeOptions(
+  frame: Frame,
+  mirrorInResize = true,
+): ResizeOptions<'uint8'> {
+  'worklet';
   return {
-    state: plugin.state as PoseDetectorState,
-    frameProcessor: enabled && modelReady ? frameProcessor : undefined,
+    scale: { width: POSE_INPUT_SIZE, height: POSE_INPUT_SIZE },
+    pixelFormat: 'rgb',
+    dataType: 'uint8',
+    rotation: orientationToRotation(frame.orientation),
+    mirror: mirrorInResize ? frame.isMirrored : false,
   };
 }
 
-export function detectPose(
-  frame: Frame,
-  model: { runSync: (inputs: ArrayBuffer[] | Uint8Array[]) => (Float32Array | Uint8Array)[] },
-): PoseKeypoint[] {
-  'worklet';
-  const buffer = frame.toArrayBuffer();
-  const input = preprocessRGBFrame(buffer, frame.width, frame.height);
-  const outputs = model.runSync([input]);
-  const raw = outputs[0];
+export function flatOutputToKeypoints(raw: Float32Array | Uint8Array): PoseKeypoint[] {
   const flat: number[] = [];
   for (let i = 0; i < 51; i++) {
     flat.push(Number(raw[i] ?? 0));
   }
   return parseKeypointsFromFlat(flat);
+}
+
+export function maxKeypointScore(keypoints: PoseKeypoint[]): number {
+  let max = 0;
+  for (const kp of keypoints) {
+    if (kp.score > max) max = kp.score;
+  }
+  return max;
+}
+
+export function swapDimensionsForOrientation(
+  width: number,
+  height: number,
+  orientation: Orientation,
+): { width: number; height: number } {
+  if (!width || !height) return { width, height };
+  if (isSidewaysOrientation(orientation)) {
+    return { width: height, height: width };
+  }
+  return { width, height };
 }

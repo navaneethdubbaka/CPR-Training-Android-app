@@ -4,7 +4,7 @@ module.exports = function (api) {
     presets: [["babel-preset-expo", { unstable_transformImportMeta: true }]],
     plugins: [
       'react-native-worklets-core/plugin',
-      'react-native-reanimated/plugin',
+      ['react-native-reanimated/plugin', { processNestedWorklets: true }],
     ],
   };
 };

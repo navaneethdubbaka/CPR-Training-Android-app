@@ -782,9 +782,9 @@ const styles = StyleSheet.create({
   },
 
   frame: {
-     width: '100%',
-     //height:  ,
-     flex: 1,
+    width: '100%',
+    flex: 1,
+    minHeight: 120,
     borderRadius: 12,
     overflow: 'hidden',
     backgroundColor: 'black',

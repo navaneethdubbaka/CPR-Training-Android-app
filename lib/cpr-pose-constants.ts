@@ -13,6 +13,18 @@ const KP = {
 /** Tall framing zone for front camera at ~45° on the ground. */
 export const LOW_ANGLE_FRAMING_ZONE = { x: 0.18, y: 0.08, w: 0.64, h: 0.82 } as const;
 
+/** Expanded framing zone for Android portrait phones (matches cover preview). */
+export const ANDROID_PORTRAIT_FRAMING_ZONE = { x: 0.08, y: 0.05, w: 0.84, h: 0.90 } as const;
+
+export type FramingZone = { x: number; y: number; w: number; h: number };
+
+export function getFramingZone(platform: string, viewWidth: number, viewHeight: number): FramingZone {
+  if (platform === 'android' && viewHeight > viewWidth) {
+    return ANDROID_PORTRAIT_FRAMING_ZONE;
+  }
+  return LOW_ANGLE_FRAMING_ZONE;
+}
+
 export const POSE_CONF_DEFAULT = 0.25;
 export const POSE_CONF_EAR = 0.18;
 export const POSE_CONF_NOSE = 0.2;
