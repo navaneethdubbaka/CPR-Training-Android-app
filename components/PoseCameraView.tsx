@@ -449,35 +449,23 @@ export function PoseCameraView({
     }
 
     if (Platform.OS === 'android') {
-      // Mathematically rotate keypoints because the native C++ plugin fails to rotate the landscape buffer
-      let rotDegrees = 0;
-      if (frameOrientation === 'portrait') {
-         rotDegrees = activeDevice?.position === 'front' ? 90 : 270;
-      } else if (frameOrientation === 'portrait-upside-down') {
-         rotDegrees = activeDevice?.position === 'front' ? 270 : 90;
-      } else if (frameOrientation === 'landscape-left') {
-         rotDegrees = activeDevice?.position === 'front' ? 180 : 0;
-      } else if (frameOrientation === 'landscape-right') {
-         rotDegrees = activeDevice?.position === 'front' ? 0 : 180;
-      }
+      kps = kps.map(kp => {
+        let x = kp.x;
+        let y = kp.y;
 
-      if (rotDegrees !== 0) {
-        kps = kps.map(kp => {
-          const tx = kp.x - 0.5;
-          const ty = kp.y - 0.5;
-          let rotX = tx, rotY = ty;
-          
-          if (rotDegrees === 90) {
-             rotX = -ty; rotY = tx;
-          } else if (rotDegrees === 180) {
-             rotX = -tx; rotY = -ty;
-          } else if (rotDegrees === 270) {
-             rotX = ty; rotY = -tx;
-          }
-          
-          return { ...kp, x: rotX + 0.5, y: rotY + 0.5 };
-        });
-      }
+        // Front camera preview is mirrored natively by VisionCamera
+        if (isFrontFacing) {
+           x = 1 - x;
+        }
+
+        // Map the 1080x1080 top-square back to the full 1080x1920 video dimensions.
+        if (videoHeight > videoWidth) {
+           const squareRatio = videoWidth / videoHeight;
+           y = y * squareRatio;
+        }
+
+        return { ...kp, x, y };
+      });
     }
 
     // Removed videoAspect mapping entirely. Since we use a full-frame stretch in the resize plugin,
@@ -606,13 +594,23 @@ export function PoseCameraView({
 
     try {
 
+      let nativeRotation: '0deg' | '90deg' | '180deg' | '270deg' = '0deg';
+      if (Platform.OS === 'android') {
+        // The rotation plugin is CCW. 
+        // Front camera landscape buffer has top pointing LEFT (270 deg absolute).
+        // To make it upright (360/0 deg), we must rotate it 270 deg CCW (which is 90 deg CW).
+        nativeRotation = isFrontFacing ? '270deg' : '90deg';
+      }
+
+      const minDim = Math.min(frame.width, frame.height);
       const resized = resize(frame, {
-        // Stretch the exact frame dimensions to prevent the plugin from center-cropping
-        crop: { x: 0, y: 0, width: frame.width, height: frame.height },
+        // We crop a perfect 1:1 square from the top of the physical world (X=0, Y=0).
+        // This avoids ALL native C++ bounds-checking clamps and out-of-bounds diagonal shear bugs.
+        crop: { x: 0, y: 0, width: minDim, height: minDim },
         scale: { width: 192, height: 192 },
         pixelFormat: 'rgb',
         dataType: 'uint8',
-        rotation: '0deg', // We bypass buggy native rotation and do it mathematically in JS instead
+        rotation: nativeRotation,
         mirror: false,
       });
 
