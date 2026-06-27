@@ -597,10 +597,20 @@ export function PoseCameraView({
 
       let nativeRotation: '0deg' | '90deg' | '180deg' | '270deg' = '0deg';
       if (Platform.OS === 'android') {
-        // The rotation plugin is CCW. 
-        // Front camera landscape buffer has top pointing LEFT (270 deg absolute).
-        // To make it upright (360/0 deg), we must rotate it 270 deg CCW (which is 90 deg CW).
-        nativeRotation = isFrontFacing ? '270deg' : '90deg';
+        switch (frame.orientation) {
+          case 'portrait':
+            nativeRotation = '0deg';
+            break;
+          case 'portrait-upside-down':
+            nativeRotation = '180deg';
+            break;
+          case 'landscape-left':
+            nativeRotation = isFrontFacing ? '270deg' : '90deg';
+            break;
+          case 'landscape-right':
+            nativeRotation = isFrontFacing ? '90deg' : '270deg';
+            break;
+        }
       }
 
       // 1. Calculate a perfect center square crop to prevent any out-of-bounds reads.

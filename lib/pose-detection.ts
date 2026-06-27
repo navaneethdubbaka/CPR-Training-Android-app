@@ -73,7 +73,7 @@ export function swapDimensionsForOrientation(
   orientation: Orientation,
 ): { width: number; height: number } {
   if (!width || !height) return { width, height };
-  if (orientation === 'portrait' || orientation === 'portrait-upside-down') {
+  if (orientation === 'landscape-left' || orientation === 'landscape-right') {
     return { width: height, height: width };
   }
   return { width, height };
