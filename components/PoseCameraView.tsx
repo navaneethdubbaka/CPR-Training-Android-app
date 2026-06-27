@@ -429,7 +429,62 @@ export function PoseCameraView({
 
   const handleInferenceTick = useCallback((flat: number[], maxScore: number) => {
 
-    const kps = parseKeypointsFromFlat(flat);
+    let kps = parseKeypointsFromFlat(flat);
+
+    const fW = frameSize.width || format?.videoWidth || 720;
+
+    const fH = frameSize.height || format?.videoHeight || 480;
+
+    const swapped = swapDimensionsForOrientation(fW, fH, frameOrientation);
+
+    const videoWidth = swapped.width;
+
+    const videoHeight = swapped.height;
+
+
+
+    if (__DEV__) {
+      console.log(`[PoseCamera] frame=${fW}x${fH} orientation=${frameOrientation} video=${videoWidth}x${videoHeight}`);
+      console.log(`[PoseCamera] parsed nose: x=${kps[0]?.x.toFixed(4)} y=${kps[0]?.y.toFixed(4)} score=${kps[0]?.score.toFixed(4)}`);
+    }
+
+    if (Platform.OS === 'android') {
+      // Mathematically rotate keypoints because the native C++ plugin fails to rotate the landscape buffer
+      let rotDegrees = 0;
+      if (frameOrientation === 'portrait') {
+         rotDegrees = activeDevice?.position === 'front' ? 90 : 270;
+      } else if (frameOrientation === 'portrait-upside-down') {
+         rotDegrees = activeDevice?.position === 'front' ? 270 : 90;
+      } else if (frameOrientation === 'landscape-left') {
+         rotDegrees = activeDevice?.position === 'front' ? 180 : 0;
+      } else if (frameOrientation === 'landscape-right') {
+         rotDegrees = activeDevice?.position === 'front' ? 0 : 180;
+      }
+
+      if (rotDegrees !== 0) {
+        kps = kps.map(kp => {
+          const tx = kp.x - 0.5;
+          const ty = kp.y - 0.5;
+          let rotX = tx, rotY = ty;
+          
+          if (rotDegrees === 90) {
+             rotX = -ty; rotY = tx;
+          } else if (rotDegrees === 180) {
+             rotX = -tx; rotY = -ty;
+          } else if (rotDegrees === 270) {
+             rotX = ty; rotY = -tx;
+          }
+          
+          return { ...kp, x: rotX + 0.5, y: rotY + 0.5 };
+        });
+      }
+    }
+
+    // Removed videoAspect mapping entirely. Since we use a full-frame stretch in the resize plugin,
+    // the model's 0..1 output coordinates naturally represent the full screen boundaries
+    // once rotated mathematically.
+
+
 
     const result = analyzeCPRPosture(kps, 'low_angle_45', poseCheckMode, framingZone);
 
@@ -439,13 +494,33 @@ export function PoseCameraView({
 
     handlePostureResult(kps, result);
 
+
+
     if (__DEV__ && maxScore > 0) {
 
       console.log('[PoseCamera] inference maxScore', maxScore.toFixed(3));
 
     }
 
-  }, [poseCheckMode, framingZone, handlePostureResult]);
+  }, [
+
+    poseCheckMode,
+
+    framingZone,
+
+    handlePostureResult,
+
+    frameSize.width,
+
+    frameSize.height,
+
+    format?.videoWidth,
+
+    format?.videoHeight,
+
+    frameOrientation,
+
+  ]);
 
 
 
@@ -474,6 +549,10 @@ export function PoseCameraView({
 
 
   const detectorEnabled = enableHandTracking && !isPaused;
+
+  const sensorOrientation = activeDevice?.sensorOrientation ?? 'portrait';
+
+  const isFrontFacing = activeDevice?.position === 'front';
 
 
 
@@ -527,34 +606,14 @@ export function PoseCameraView({
 
     try {
 
-      const rotation = frame.orientation === 'landscape-left'
-
-        ? '90deg'
-
-        : frame.orientation === 'landscape-right'
-
-        ? '270deg'
-
-        : frame.orientation === 'portrait-upside-down'
-
-        ? '180deg'
-
-        : '0deg';
-
-
-
       const resized = resize(frame, {
-
+        // Stretch the exact frame dimensions to prevent the plugin from center-cropping
+        crop: { x: 0, y: 0, width: frame.width, height: frame.height },
         scale: { width: 192, height: 192 },
-
         pixelFormat: 'rgb',
-
         dataType: 'uint8',
-
-        rotation: rotation,
-
-        mirror: frame.isMirrored,
-
+        rotation: '0deg', // We bypass buggy native rotation and do it mathematically in JS instead
+        mirror: false,
       });
 
 
@@ -624,6 +683,10 @@ export function PoseCameraView({
     lastErrorAt,
 
     frameCounter,
+
+    isFrontFacing,
+
+    sensorOrientation,
 
   ]);
 
@@ -815,7 +878,7 @@ export function PoseCameraView({
 
   const hasExternalCameras = externalDevices.length > 0;
 
-  const mirrorX = false;
+  const mirrorX = activeDevice?.position === 'front';
 
   const visibleJoints = keypoints.filter(kp => kp.score >= 0.1).length;
 
