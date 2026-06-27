@@ -458,19 +458,20 @@ export function PoseCameraView({
            x = 1 - x;
         }
 
-        // Map the 1080x1080 top-square back to the full 1080x1920 video dimensions.
+        // Map the center 192x192 square back to the full video dimensions.
         if (videoHeight > videoWidth) {
            const squareRatio = videoWidth / videoHeight;
-           y = y * squareRatio;
+           const offset = (1 - squareRatio) / 2;
+           y = offset + y * squareRatio;
+        } else if (videoWidth > videoHeight) {
+           const squareRatio = videoHeight / videoWidth;
+           const offset = (1 - squareRatio) / 2;
+           x = offset + x * squareRatio;
         }
 
         return { ...kp, x, y };
       });
     }
-
-    // Removed videoAspect mapping entirely. Since we use a full-frame stretch in the resize plugin,
-    // the model's 0..1 output coordinates naturally represent the full screen boundaries
-    // once rotated mathematically.
 
 
 
@@ -602,19 +603,21 @@ export function PoseCameraView({
         nativeRotation = isFrontFacing ? '270deg' : '90deg';
       }
 
+      // 1. Calculate a perfect center square crop to prevent any out-of-bounds reads.
+      // If the sensor is landscape (1920x1080), this crops the center 1080x1080.
+      // If the sensor is portrait (1080x1920), this crops the center 1080x1080.
       const minDim = Math.min(frame.width, frame.height);
+      const cropX = (frame.width - minDim) / 2;
+      const cropY = (frame.height - minDim) / 2;
+
       const resized = resize(frame, {
-        // We crop a perfect 1:1 square from the top of the physical world (X=0, Y=0).
-        // This avoids ALL native C++ bounds-checking clamps and out-of-bounds diagonal shear bugs.
-        crop: { x: 0, y: 0, width: minDim, height: minDim },
-        scale: { width: 192, height: 192 },
+        crop: { x: cropX, y: cropY, width: minDim, height: minDim },
+        scale: { width: 192, height: 192 }, 
         pixelFormat: 'rgb',
         dataType: 'uint8',
         rotation: nativeRotation,
         mirror: false,
       });
-
-
 
       const outputs = model.runSync([resized]);
 
