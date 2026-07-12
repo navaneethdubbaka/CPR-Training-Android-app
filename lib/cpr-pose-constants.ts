@@ -10,11 +10,11 @@ const KP = {
   RIGHT_WRIST: 10,
 } as const;
 
-/** Tall framing zone for front camera at ~45° on the ground. */
-export const LOW_ANGLE_FRAMING_ZONE = { x: 0.18, y: 0.08, w: 0.64, h: 0.82 } as const;
+/** Full-view framing zone — matches the camera preview window edge-to-edge. */
+export const LOW_ANGLE_FRAMING_ZONE = { x: 0, y: 0, w: 1, h: 1 } as const;
 
-/** Expanded framing zone for Android portrait phones (matches cover preview). */
-export const ANDROID_PORTRAIT_FRAMING_ZONE = { x: 0.08, y: 0.05, w: 0.84, h: 0.90 } as const;
+/** Full-view framing zone for Android portrait (same as landscape). */
+export const ANDROID_PORTRAIT_FRAMING_ZONE = { x: 0, y: 0, w: 1, h: 1 } as const;
 
 export type FramingZone = { x: number; y: number; w: number; h: number };
 

@@ -46,6 +46,13 @@
         "android.permission.ACCESS_NETWORK_STATE",
         "android.permission.RECORD_AUDIO"
       ],
+      "queries": [
+        {
+          "intent": {
+            "action": "android.speech.RecognitionService"
+          }
+        }
+      ],
       "intentFilters": [
         {
           "action": "android.hardware.usb.action.USB_DEVICE_ATTACHED",
@@ -86,6 +93,12 @@
           "cameraPermissionText": "Camera is used to track arm position during CPR training",
           "enableMicrophonePermission": false,
           "enableFrameProcessors": true
+        }
+      ],
+      [
+        "expo-speech-recognition",
+        {
+          "microphonePermission": "Microphone is used for voice recognition during CPR training steps"
         }
       ],
       "react-native-fast-tflite"

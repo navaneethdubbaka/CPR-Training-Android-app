@@ -1,4 +1,5 @@
 import { Platform } from 'react-native';
+import * as Speech from 'expo-speech';
 
 export type VoiceState = 'idle' | 'listening' | 'recognized' | 'failed';
 
@@ -9,15 +10,14 @@ export interface VoiceRecognitionCallbacks {
   onEnd?: () => void;
 }
 
-let voiceModule: any = null;
+let speechModule: typeof import('expo-speech-recognition') | null = null;
 
-async function getVoiceModule() {
+async function getSpeechRecognitionModule() {
   if (Platform.OS === 'web') return null;
-  if (voiceModule) return voiceModule;
+  if (speechModule) return speechModule;
   try {
-    const m = await import('@react-native-voice/voice');
-    voiceModule = m.default ?? m;
-    return voiceModule;
+    speechModule = await import('expo-speech-recognition');
+    return speechModule;
   } catch {
     return null;
   }
@@ -72,25 +72,53 @@ export function matchesHelpShout(transcript: string): boolean {
   return phrases.some(p => t.includes(normalizeText(p)));
 }
 
+type ListenerSubscription = { remove: () => void };
+
 class VoiceRecognitionManager {
   private webRecognition: any = null;
   private isListening = false;
+  private sessionId = 0;
+  private nativeListeners: ListenerSubscription[] = [];
+
+  private bumpSession(): number {
+    this.sessionId += 1;
+    return this.sessionId;
+  }
+
+  private isStaleSession(id: number): boolean {
+    return id !== this.sessionId;
+  }
+
+  private clearNativeListeners(): void {
+    for (const sub of this.nativeListeners) {
+      try {
+        sub.remove();
+      } catch {}
+    }
+    this.nativeListeners = [];
+  }
 
   async startListening(callbacks: VoiceRecognitionCallbacks): Promise<void> {
     if (this.isListening) {
       await this.stopListening();
     }
     this.isListening = true;
+    const session = this.bumpSession();
+
+    Speech.stop();
 
     if (Platform.OS === 'web') {
-      this.startWebListening(callbacks);
+      this.startWebListening(callbacks, session);
     } else {
-      await this.startNativeListening(callbacks);
+      await this.startNativeListening(callbacks, session);
     }
   }
 
   async stopListening(): Promise<void> {
+    this.bumpSession();
     this.isListening = false;
+    this.clearNativeListeners();
+
     if (Platform.OS === 'web') {
       if (this.webRecognition) {
         try {
@@ -98,37 +126,53 @@ class VoiceRecognitionManager {
         } catch {}
         this.webRecognition = null;
       }
-    } else {
-      const Voice = await getVoiceModule();
-      if (Voice) {
-        try {
-          await Voice.stop();
-        } catch {}
-      }
+      return;
+    }
+
+    const speech = await getSpeechRecognitionModule();
+    if (speech) {
+      try {
+        speech.ExpoSpeechRecognitionModule.stop();
+      } catch {}
     }
   }
 
   async destroy(): Promise<void> {
     await this.stopListening();
-    if (Platform.OS !== 'web') {
-      const Voice = await getVoiceModule();
-      if (Voice) {
-        try {
-          await Voice.destroy();
-        } catch {}
-      }
+    if (Platform.OS === 'web') return;
+
+    const speech = await getSpeechRecognitionModule();
+    if (speech) {
+      try {
+        speech.ExpoSpeechRecognitionModule.abort();
+      } catch {}
     }
   }
 
-  isAvailable(): boolean {
+  async isAvailable(): Promise<boolean> {
     if (Platform.OS === 'web') {
       return typeof window !== 'undefined' &&
         (!!(window as any).SpeechRecognition || !!(window as any).webkitSpeechRecognition);
     }
-    return true;
+
+    const speech = await getSpeechRecognitionModule();
+    if (!speech) return false;
+
+    try {
+      if (!speech.ExpoSpeechRecognitionModule.isRecognitionAvailable()) {
+        return false;
+      }
+      if (Platform.OS === 'android') {
+        const services = speech.ExpoSpeechRecognitionModule.getSpeechRecognitionServices();
+        return services.length > 0;
+      }
+      return true;
+    } catch {
+      return false;
+    }
   }
 
-  private startWebListening(callbacks: VoiceRecognitionCallbacks): void {
+  private startWebListening(callbacks: VoiceRecognitionCallbacks, session: number): void {
     const SpeechRecognition =
       (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
 
@@ -147,10 +191,12 @@ class VoiceRecognitionManager {
     this.webRecognition = recognition;
 
     recognition.onstart = () => {
+      if (this.isStaleSession(session)) return;
       callbacks.onStart?.();
     };
 
     recognition.onresult = (event: any) => {
+      if (this.isStaleSession(session)) return;
       let bestTranscript = '';
       for (let i = event.resultIndex; i < event.results.length; i++) {
         const result = event.results[i];
@@ -162,11 +208,13 @@ class VoiceRecognitionManager {
     };
 
     recognition.onerror = (event: any) => {
+      if (this.isStaleSession(session)) return;
       const errMsg = event.error === 'no-speech' ? 'No speech detected' : `Error: ${event.error}`;
       callbacks.onError?.(errMsg);
     };
 
     recognition.onend = () => {
+      if (this.isStaleSession(session)) return;
       this.webRecognition = null;
       this.isListening = false;
       callbacks.onEnd?.();
@@ -181,38 +229,76 @@ class VoiceRecognitionManager {
     }
   }
 
-  private async startNativeListening(callbacks: VoiceRecognitionCallbacks): Promise<void> {
-    const Voice = await getVoiceModule();
-    if (!Voice) {
+  private async startNativeListening(callbacks: VoiceRecognitionCallbacks, session: number): Promise<void> {
+    const speech = await getSpeechRecognitionModule();
+    if (!speech) {
       callbacks.onError?.('Voice recognition not available on this device');
       callbacks.onEnd?.();
       this.isListening = false;
       return;
     }
 
-    Voice.onSpeechStart = () => callbacks.onStart?.();
-    Voice.onSpeechResults = (e: any) => {
-      const results: string[] = e?.value ?? [];
-      if (results.length > 0) {
-        callbacks.onResult?.(results[0]);
-      }
-    };
-    Voice.onSpeechPartialResults = (e: any) => {
-      const results: string[] = e?.value ?? [];
-      if (results.length > 0) {
-        callbacks.onResult?.(results[0]);
-      }
-    };
-    Voice.onSpeechError = (e: any) => {
-      callbacks.onError?.(e?.error?.message ?? 'Recognition error');
-    };
-    Voice.onSpeechEnd = () => {
-      this.isListening = false;
+    const { ExpoSpeechRecognitionModule } = speech;
+
+    if (!ExpoSpeechRecognitionModule.isRecognitionAvailable()) {
+      callbacks.onError?.('Speech recognition not available on this device');
       callbacks.onEnd?.();
-    };
+      this.isListening = false;
+      return;
+    }
+
+    if (Platform.OS === 'android') {
+      const services = ExpoSpeechRecognitionModule.getSpeechRecognitionServices();
+      if (!services.length) {
+        callbacks.onError?.('No speech recognition service found. Install Google app.');
+        callbacks.onEnd?.();
+        this.isListening = false;
+        return;
+      }
+    }
+
+    this.clearNativeListeners();
+
+    this.nativeListeners.push(
+      ExpoSpeechRecognitionModule.addListener('start', () => {
+        if (this.isStaleSession(session)) return;
+        callbacks.onStart?.();
+      }),
+    );
+
+    this.nativeListeners.push(
+      ExpoSpeechRecognitionModule.addListener('result', (event: { results?: { transcript: string }[] }) => {
+        if (this.isStaleSession(session)) return;
+        const transcript = event.results?.[0]?.transcript ?? '';
+        if (transcript) {
+          callbacks.onResult?.(transcript);
+        }
+      }),
+    );
+
+    this.nativeListeners.push(
+      ExpoSpeechRecognitionModule.addListener('error', (event: { error?: string; message?: string }) => {
+        if (this.isStaleSession(session)) return;
+        const msg = event.message ?? event.error ?? 'Recognition error';
+        callbacks.onError?.(msg);
+      }),
+    );
+
+    this.nativeListeners.push(
+      ExpoSpeechRecognitionModule.addListener('end', () => {
+        if (this.isStaleSession(session)) return;
+        this.isListening = false;
+        callbacks.onEnd?.();
+      }),
+    );
 
     try {
-      await Voice.start('en-US');
+      ExpoSpeechRecognitionModule.start({
+        lang: 'en-US',
+        interimResults: true,
+        continuous: false,
+        maxAlternatives: 1,
+      });
     } catch (e: any) {
       callbacks.onError?.(e.message || 'Failed to start recognition');
       callbacks.onEnd?.();

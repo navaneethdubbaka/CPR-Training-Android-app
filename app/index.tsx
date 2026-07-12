@@ -25,6 +25,7 @@ import { EnduranceScreen } from '@/components/EnduranceScreen';
 import { StepVideo } from '@/components/StepVideo';
 import type { CPRPostureResult } from '@/lib/pose-analysis';
 import { FRAMING_HOLD_MS, getPoseCheckModeForStep, isFramingGateReady } from '@/lib/cpr-pose-constants';
+import { useVoiceListening } from '@/contexts/VoiceListeningContext';
 
 const ENABLE_POSE_VOICE_CUES = true;
 
@@ -67,6 +68,7 @@ export default function TrainingScreen() {
   const totalCycles = isTesting ? CYCLES_TESTING : CYCLES_TRAINING;
   const postShockTotalCycles = isTesting ? POST_SHOCK_CYCLES_TESTING : POST_SHOCK_CYCLES_TRAINING;
   const poseCheckMode = getPoseCheckModeForStep(currentStepId);
+  const { isVoiceListening } = useVoiceListening();
   const showVisualCamera = !isAedStep(currentStepId);
   const showPoseTracking = showVisualCamera && poseCheckMode !== null;
 
@@ -315,7 +317,7 @@ useEffect(() => {
         onHandDetected={currentStep?.id === 'hand_placement' ? verifyHandPlacement : undefined}
         onPostureResult={setPostureResult}
         enableHandTracking={showPoseTracking}
-        isPaused={isPaused}
+        isPaused={isPaused || (Platform.OS === 'android' && isVoiceListening)}
         poseCheckMode={poseCheckMode ?? 'full_cpr'}
         currentStepId={currentStepId}
       />

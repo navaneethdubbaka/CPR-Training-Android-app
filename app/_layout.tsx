@@ -9,6 +9,7 @@ import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { queryClient } from "@/lib/query-client";
 import { CPRTrainingProvider } from "@/contexts/CPRTrainingContext";
 import { ThemeProvider } from "@/contexts/ThemeContext";
+import { VoiceListeningProvider } from "@/contexts/VoiceListeningContext";
 import { arduinoSerial } from "@/lib/arduino-serial";
 import { videoAssignments } from "@/lib/video-assignments";
 
@@ -30,10 +31,9 @@ export default function RootLayout() {
     videoAssignments.load().catch(() => {});
     SplashScreen.hideAsync();
     if (Platform.OS === 'android') {
-      PermissionsAndroid.requestMultiple([
-        PermissionsAndroid.PERMISSIONS.RECORD_AUDIO,
-        PermissionsAndroid.PERMISSIONS.CAMERA,
-      ]).catch(() => {});
+      PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.CAMERA).catch((err) => {
+        if (__DEV__) console.warn('[layout] camera permission request failed:', err);
+      });
     }
   }, []);
 
@@ -43,7 +43,9 @@ export default function RootLayout() {
         <GestureHandlerRootView style={{ flex: 1 }}>
           <ThemeProvider>
             <CPRTrainingProvider>
-              <RootLayoutNav />
+              <VoiceListeningProvider>
+                <RootLayoutNav />
+              </VoiceListeningProvider>
             </CPRTrainingProvider>
           </ThemeProvider>
         </GestureHandlerRootView>

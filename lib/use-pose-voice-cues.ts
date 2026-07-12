@@ -14,7 +14,7 @@ export function usePoseVoiceCues(
   const poseCueSinceRef = useRef<number | null>(null);
 
   useEffect(() => {
-    if (!enabled || !postureResult) return;
+    if (!enabled || !postureResult || checkMode === 'framing_only') return;
 
     const now = Date.now();
     if (now - lastCueTime.current < 3000) return;

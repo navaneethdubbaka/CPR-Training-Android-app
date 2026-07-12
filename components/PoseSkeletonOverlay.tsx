@@ -297,7 +297,7 @@ export function PoseSkeletonOverlay({
           fill={zoneFill}
           stroke={zoneColor}
           strokeWidth={2.5}
-          rx={8}
+          rx={12}
           opacity={0.9}
         />
         <SvgText

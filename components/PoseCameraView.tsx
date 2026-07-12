@@ -799,7 +799,7 @@ export function PoseCameraView({
 
     postureResult,
 
-    enableHandTracking && modelReady && !isPaused,
+    enableHandTracking && modelReady && !isPaused && poseCheckMode !== 'framing_only',
 
     poseCheckMode,
 
