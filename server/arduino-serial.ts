@@ -190,6 +190,10 @@ class BackendArduinoSerial {
   }
 
   private parseSensorLine(line: string): RawSensorData | null {
+    const trimmed = line.trim();
+    if (trimmed.startsWith('#')) {
+      return null;
+    }
     const parts = line.split(',').map(p => p.trim()).filter(p => p !== '');
     if (parts.length >= 7) {
       const channels: number[] = parts.map(p => parseFloat(p) || 0);

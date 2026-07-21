@@ -21,7 +21,8 @@ import {
   CPR_FUNCTION_ICONS,
   CPR_FUNCTION_DESCRIPTIONS,
   DEFAULT_BAUD_RATE,
-  ARDUINO_CHANNELS,
+  HARDWARE_PROFILE_LIST,
+  type HardwareProfileId,
   type AvailablePort,
 } from '@/lib/arduino-serial';
 import type { BleDevice } from '@/lib/ble-serial';
@@ -109,16 +110,20 @@ const LINE_ENDINGS = [
 
 const CHANNEL_TYPE_ICONS: Record<string, IconName> = {
   i2c_touch: 'gesture-tap',
+  analog_touch: 'gesture-tap',
   ultrasonic: 'signal-distance-variant',
   analog: 'sine-wave',
+  force: 'gauge',
   digital: 'toggle-switch-outline',
 };
 
 function getChannelTypeColors(C: ReturnType<typeof getColors>): Record<string, string> {
   return {
     i2c_touch: C.info,
+    analog_touch: C.info,
     ultrasonic: C.accent,
     analog: C.feedbackGood,
+    force: C.warning,
     digital: C.warning,
   };
 }
@@ -438,6 +443,7 @@ function SerialMonitorTab({ isConnected }: { isConnected: boolean }) {
   const [paused, setPaused] = useState(false);
   const [showCode, setShowCode] = useState(false);
   const [arduinoCode, setArduinoCode] = useState<string | null>(ARDUINO_CODE_CONTENT);
+  const [firmwarePath, setFirmwarePath] = useState(arduinoSerial.getFirmwarePath());
   const [showLineEndingPicker, setShowLineEndingPicker] = useState(false);
   const flatListRef = useRef<FlatList>(null);
   const pausedRef = useRef(false);
@@ -447,18 +453,25 @@ function SerialMonitorTab({ isConnected }: { isConnected: boolean }) {
   }, [paused]);
 
   useEffect(() => {
-    if (!arduinoCode) {
-      fetch('/attached_assets/final_arduino_code_1771601973155.ino')
-        .then(r => r.ok ? r.text() : null)
-        .catch(() => null)
-        .then(text => {
-          if (text) {
-            ARDUINO_CODE_CONTENT = text;
-            setArduinoCode(text);
-          }
-        });
-    }
+    const unsub = arduinoSerial.onProfileChange(() => {
+      setFirmwarePath(arduinoSerial.getFirmwarePath());
+      setArduinoCode(null);
+      ARDUINO_CODE_CONTENT = null;
+    });
+    return unsub;
   }, []);
+
+  useEffect(() => {
+    fetch(firmwarePath)
+      .then(r => r.ok ? r.text() : null)
+      .catch(() => null)
+      .then(text => {
+        if (text) {
+          ARDUINO_CODE_CONTENT = text;
+          setArduinoCode(text);
+        }
+      });
+  }, [firmwarePath]);
 
   useEffect(() => {
     const existing = arduinoSerial.getSerialLog();
@@ -662,6 +675,7 @@ export function SettingsModal({ visible, onClose, connectionStatus, onConnect, o
   const [loadingBle, setLoadingBle] = useState(false);
   const [selectedBleId, setSelectedBleId] = useState<string | null>(null);
   const [tcpConfig, setTcpConfig] = useState(arduinoSerial.getTcpConfig());
+  const [hardwareProfileId, setHardwareProfileId] = useState<HardwareProfileId>(arduinoSerial.getHardwareProfileId());
   const isConnected = connectionStatus === 'connected';
   const isWeb = Platform.OS === 'web';
   const connectionOptions = isWeb ? WEB_CONNECTION_OPTIONS : NATIVE_CONNECTION_OPTIONS;
@@ -699,6 +713,12 @@ export function SettingsModal({ visible, onClose, connectionStatus, onConnect, o
       setBreathOffset(bOffset);
     });
 
+    const unsubProfile = arduinoSerial.onProfileChange((profileId) => {
+      setHardwareProfileId(profileId);
+      setChannels(arduinoSerial.getChannels());
+      setAssignments(arduinoSerial.getAssignments());
+    });
+
     const unsubVideos = videoAssignments.onChange((newVideos) => {
       setVideos({ ...newVideos });
     });
@@ -722,6 +742,7 @@ export function SettingsModal({ visible, onClose, connectionStatus, onConnect, o
       unsubMode();
       unsubInvert();
       unsubOffset();
+      unsubProfile();
       unsubVideos();
       if (sensorPollRef.current) {
         clearInterval(sensorPollRef.current);
@@ -825,16 +846,48 @@ export function SettingsModal({ visible, onClose, connectionStatus, onConnect, o
     arduinoSerial.setAssignment(fn, channelIndex);
   };
 
+  const handleHardwareProfileChange = (profileId: HardwareProfileId) => {
+    if (profileId === hardwareProfileId) return;
+    if (isConnected) {
+      Alert.alert('Disconnect required', 'Disconnect from the device before switching hardware profile.');
+      return;
+    }
+    Alert.alert(
+      'Switch hardware profile?',
+      'Channel assignments will reset to the defaults for the selected profile.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Switch',
+          onPress: () => {
+            arduinoSerial.setHardwareProfile(profileId, true).then(() => {
+              setHardwareProfileId(profileId);
+              setChannels(arduinoSerial.getChannels());
+              setAssignments(arduinoSerial.getAssignments());
+              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+            }).catch(() => {});
+          },
+        },
+      ],
+    );
+  };
+
   const openPicker = (fn: CPRFunction) => {
     setPickerFn(fn);
     setPickerVisible(true);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
   };
 
-  const i2cTouchCount = sensors.filter(s => s.type === 'i2c_touch').length;
+  const touchCount = sensors.filter(s => s.type === 'i2c_touch' || s.type === 'analog_touch').length;
   const digitalCount = sensors.filter(s => s.type === 'digital').length;
-  const analogCount = sensors.filter(s => s.type === 'analog' || s.type === 'ultrasonic').length;
+  const analogCount = sensors.filter(s => s.type === 'analog' || s.type === 'ultrasonic' || s.type === 'force').length;
   const activeSensorCount = sensors.filter(s => s.active).length;
+  const touchSectionTitle = hardwareProfileId === 'analog_v2'
+    ? 'Analog Touch Sensors'
+    : 'I2C Capacitive Touch (MPR121)';
+  const touchSensors = sensors.filter(s => s.type === 'i2c_touch' || s.type === 'analog_touch');
+  const measurementSensors = sensors.filter(s => s.type === 'ultrasonic' || s.type === 'analog' || s.type === 'force');
+  const digitalSensors = sensors.filter(s => s.type === 'digital' && s.pin !== '—');
   const currentBoard = ARDUINO_BOARDS.find(b => b.name === selectedBoard);
 
   const isLargeTablet = screenWidth >= 900;
@@ -1011,6 +1064,40 @@ export function SettingsModal({ visible, onClose, connectionStatus, onConnect, o
                       >
                         <View style={[styles.toggleThumb, hardwareOnly && styles.toggleThumbActive]} />
                       </Pressable>
+                    </View>
+                  </View>
+
+                  <View style={styles.section}>
+                    <Text style={styles.sectionTitle}>Hardware Profile</Text>
+                    <Text style={[styles.assignmentHeaderText, { marginBottom: 10 }]}>
+                      Select the board wired to this trainer. Profiles use different channel maps and scaling.
+                    </Text>
+                    <View style={styles.connTypeGrid}>
+                      {HARDWARE_PROFILE_LIST.map(profile => (
+                        <Pressable
+                          key={profile.id}
+                          style={[
+                            styles.connTypeBtn,
+                            hardwareProfileId === profile.id && styles.connTypeBtnActive,
+                          ]}
+                          onPress={() => handleHardwareProfileChange(profile.id)}
+                        >
+                          <MaterialCommunityIcons
+                            name={profile.id === 'analog_v2' ? 'flash' : 'chip'}
+                            size={20}
+                            color={hardwareProfileId === profile.id ? C.accent : C.textMuted}
+                          />
+                          <Text style={[
+                            styles.connTypeLabel,
+                            hardwareProfileId === profile.id && { color: C.accent },
+                          ]}>
+                            {profile.label}
+                          </Text>
+                          <Text style={styles.connTypeDesc}>
+                            {profile.id === 'analog_v2' ? 'A7/A9/A11/A13/A15 + J5.A1' : 'MPR121 I2C touch + A0'}
+                          </Text>
+                        </Pressable>
+                      ))}
                     </View>
                   </View>
 
@@ -1343,7 +1430,21 @@ export function SettingsModal({ visible, onClose, connectionStatus, onConnect, o
                         key={fn}
                         fn={fn}
                         assignments={assignments}
-                        channels={ARDUINO_CHANNELS}
+                        channels={channels}
+                        isConnected={isConnected}
+                        onPickerOpen={openPicker}
+                      />
+                    ))}
+                  </View>
+
+                  <View style={styles.section}>
+                    <Text style={styles.sectionTitle}>Open Airway</Text>
+                    {(['neckTilt'] as CPRFunction[]).map(fn => (
+                      <AssignmentRow
+                        key={fn}
+                        fn={fn}
+                        assignments={assignments}
+                        channels={channels}
                         isConnected={isConnected}
                         onPickerOpen={openPicker}
                       />
@@ -1357,7 +1458,7 @@ export function SettingsModal({ visible, onClose, connectionStatus, onConnect, o
                         key={fn}
                         fn={fn}
                         assignments={assignments}
-                        channels={ARDUINO_CHANNELS}
+                        channels={channels}
                         isConnected={isConnected}
                         onPickerOpen={openPicker}
                       />
@@ -1371,7 +1472,7 @@ export function SettingsModal({ visible, onClose, connectionStatus, onConnect, o
                         key={fn}
                         fn={fn}
                         assignments={assignments}
-                        channels={ARDUINO_CHANNELS}
+                        channels={channels}
                         isConnected={isConnected}
                         onPickerOpen={openPicker}
                       />
@@ -1386,8 +1487,8 @@ export function SettingsModal({ visible, onClose, connectionStatus, onConnect, o
                       <Text style={styles.summaryLabel}>Total</Text>
                     </View>
                     <View style={[styles.summaryCard, isNarrow && { minWidth: '30%' }]}>
-                      <Text style={[styles.summaryValue, { color: C.info }]}>{i2cTouchCount}</Text>
-                      <Text style={styles.summaryLabel}>I2C Touch</Text>
+                      <Text style={[styles.summaryValue, { color: C.info }]}>{touchCount}</Text>
+                      <Text style={styles.summaryLabel}>Touch</Text>
                     </View>
                     <View style={[styles.summaryCard, isNarrow && { minWidth: '30%' }]}>
                       <Text style={[styles.summaryValue, { color: C.warning }]}>{digitalCount}</Text>
@@ -1403,16 +1504,18 @@ export function SettingsModal({ visible, onClose, connectionStatus, onConnect, o
                     </View>
                   </View>
 
-                  <View style={styles.section}>
-                    <Text style={styles.sectionTitle}>I2C Capacitive Touch (MPR121)</Text>
-                    {sensors.filter(s => s.type === 'i2c_touch').map((sensor) => (
-                      <ChannelCard key={sensor.id} channel={sensor} isConnected={isConnected} channelIndex={parseInt(sensor.id.replace('channel_', ''), 10)} />
-                    ))}
-                  </View>
+                  {touchSensors.length > 0 && (
+                    <View style={styles.section}>
+                      <Text style={styles.sectionTitle}>{touchSectionTitle}</Text>
+                      {touchSensors.map((sensor) => (
+                        <ChannelCard key={sensor.id} channel={sensor} isConnected={isConnected} channelIndex={parseInt(sensor.id.replace('channel_', ''), 10)} />
+                      ))}
+                    </View>
+                  )}
 
                   <View style={styles.section}>
                     <Text style={styles.sectionTitle}>Ultrasonic / Analog Sensors</Text>
-                    {sensors.filter(s => s.type === 'ultrasonic' || s.type === 'analog').map((sensor) => {
+                    {measurementSensors.map((sensor) => {
                       const chIdx = parseInt(sensor.id.replace('channel_', ''), 10);
                       const isDepthChannel = chIdx === assignments['compressionDepth'];
                       const isBreathChannel = chIdx === assignments['breathPressure'];
@@ -1445,12 +1548,14 @@ export function SettingsModal({ visible, onClose, connectionStatus, onConnect, o
                     })}
                   </View>
 
-                  <View style={styles.section}>
-                    <Text style={styles.sectionTitle}>Digital Buttons</Text>
-                    {sensors.filter(s => s.type === 'digital').map((sensor) => (
-                      <ChannelCard key={sensor.id} channel={sensor} isConnected={isConnected} channelIndex={parseInt(sensor.id.replace('channel_', ''), 10)} />
-                    ))}
-                  </View>
+                  {digitalSensors.length > 0 && (
+                    <View style={styles.section}>
+                      <Text style={styles.sectionTitle}>Digital Buttons</Text>
+                      {digitalSensors.map((sensor) => (
+                        <ChannelCard key={sensor.id} channel={sensor} isConnected={isConnected} channelIndex={parseInt(sensor.id.replace('channel_', ''), 10)} />
+                      ))}
+                    </View>
+                  )}
                 </>
               )}
             </ScrollView>
@@ -1462,7 +1567,7 @@ export function SettingsModal({ visible, onClose, connectionStatus, onConnect, o
         visible={pickerVisible}
         onClose={() => setPickerVisible(false)}
         fn={pickerFn}
-        channels={ARDUINO_CHANNELS}
+        channels={channels}
         currentIndex={pickerFn ? assignments[pickerFn] : null}
         onSelect={handleAssignmentSelect}
       />

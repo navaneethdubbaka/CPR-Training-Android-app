@@ -5,6 +5,16 @@ import { bleSerial, type BleDevice } from './ble-serial';
 import { tcpSerial, type TcpConfig } from './tcp-serial';
 import { webSerial } from './webserial';
 import { COMPRESSIONS_PER_CYCLE, BREATHS_PER_CYCLE } from '@/constants/cpr-protocol';
+import {
+  DEFAULT_HARDWARE_PROFILE_ID,
+  MPR121_LEGACY_ASSIGNMENTS,
+  MPR121_LEGACY_CHANNELS,
+  assignmentsStorageKey,
+  getHardwareProfile,
+  isHardwareProfileId,
+  type HardwareProfileId,
+  type SensorChannelTemplate,
+} from './hardware-profiles';
 
 const INVERT_STORAGE_KEY = 'cpr_channel_inverts';
 const ULTRASONIC_OFFSET_KEY = 'cpr_ultrasonic_offset';
@@ -12,6 +22,7 @@ const BREATH_OFFSET_KEY = 'cpr_breath_offset';
 const FORCE_OFFSET_KEY = 'cpr_force_offset';
 const FORCE_MIN_PEAK_KEY = 'cpr_force_min_peak';
 const PREFERRED_CONNECTION_KEY = 'cpr_preferred_connection';
+const HARDWARE_PROFILE_KEY = 'cpr_hardware_profile';
 
 
 
@@ -47,7 +58,7 @@ export interface SensorData {
 export interface SensorChannel {
   index: number;
   name: string;
-  type: 'i2c_touch' | 'ultrasonic' | 'analog' | 'digital';
+  type: 'i2c_touch' | 'analog_touch' | 'ultrasonic' | 'analog' | 'force' | 'digital';
   pin: string;
   unit: string;
   description: string;
@@ -104,7 +115,7 @@ export type SensorAssignments = Record<CPRFunction, number | null>;
 export interface SensorInfo {
   id: string;
   name: string;
-  type: 'touch' | 'pressure' | 'ultrasonic' | 'analog' | 'i2c_touch' | 'digital';
+  type: 'touch' | 'pressure' | 'ultrasonic' | 'analog' | 'i2c_touch' | 'analog_touch' | 'force' | 'digital';
   pin: string;
   description: string;
   unit: string;
@@ -177,31 +188,18 @@ const DEFAULT_SENSOR_DATA: SensorData = {
   timestamp: Date.now(),
 };
 
-const ARDUINO_CHANNELS: SensorChannel[] = [
-  { index: 0, name: 'I2C Touch Pad 0', type: 'i2c_touch', pin: 'I2C (Pad 9)', unit: 'on/off', description: 'MPR121 capacitive touch pad 0 (channel 9)', active: false, currentValue: 0, inverted: false },
-  { index: 1, name: 'I2C Touch Pad 1', type: 'i2c_touch', pin: 'I2C (Pad 3)', unit: 'on/off', description: 'MPR121 capacitive touch pad 1 (channel 3)', active: false, currentValue: 0, inverted: false },
-  { index: 2, name: 'I2C Touch Pad 2', type: 'i2c_touch', pin: 'I2C (Pad 8)', unit: 'on/off', description: 'MPR121 capacitive touch pad 2 (channel 8)', active: false, currentValue: 0, inverted: false },
-  { index: 3, name: 'I2C Touch Pad 3', type: 'i2c_touch', pin: 'I2C (Pad 10)', unit: 'on/off', description: 'MPR121 capacitive touch pad 3 (channel 10)', active: false, currentValue: 0, inverted: false },
-  { index: 4, name: 'I2C Touch Pad 4', type: 'i2c_touch', pin: 'I2C (Pad 11)', unit: 'on/off', description: 'MPR121 capacitive touch pad 4 (channel 11)', active: false, currentValue: 0, inverted: false },
-  { index: 5, name: 'Ultrasonic Distance', type: 'ultrasonic', pin: 'D12/D13', unit: 'cm', description: 'PING ultrasonic distance sensor', active: false, currentValue: 0, inverted: false },
-  { index: 6, name: 'Analog Voltage', type: 'analog', pin: 'A0', unit: 'V', description: 'Analog sensor voltage reading (0-5V)', active: false, currentValue: 0, inverted: false },
-  { index: 7, name: 'Digital Button 0', type: 'digital', pin: 'D2', unit: 'on/off', description: 'Digital push button on pin 2', active: false, currentValue: 0, inverted: false },
-  { index: 8, name: 'Digital Button 1', type: 'digital', pin: 'D4', unit: 'on/off', description: 'Digital push button on pin 4', active: false, currentValue: 0, inverted: false },
-  { index: 9, name: 'Digital Button 2', type: 'digital', pin: 'D6', unit: 'on/off', description: 'Digital push button on pin 6', active: false, currentValue: 0, inverted: false },
-  { index: 10, name: 'Digital Button 3', type: 'digital', pin: 'D8', unit: 'on/off', description: 'Digital push button on pin 8', active: false, currentValue: 0, inverted: false },
-  { index: 11, name: 'Digital Button 4', type: 'digital', pin: 'D10', unit: 'on/off', description: 'Digital push button on pin 10', active: false, currentValue: 0, inverted: false },
-];
+function buildRuntimeChannels(templates: SensorChannelTemplate[]): SensorChannel[] {
+  return templates.map(ch => ({
+    ...ch,
+    type: ch.type as SensorChannel['type'],
+    active: false,
+    currentValue: 0,
+    inverted: false,
+  }));
+}
 
-const DEFAULT_ASSIGNMENTS: SensorAssignments = {
-  leftShoulder: 0,
-  rightShoulder: 1,
-  compressionDepth: 5,
-  compressionForce: null,
-  breathPressure: 6,
-  aedPadUpper: 2,
-  aedPadLower: 3,
-  neckTilt: null,
-};
+const ARDUINO_CHANNELS: SensorChannel[] = buildRuntimeChannels(MPR121_LEGACY_CHANNELS);
+const DEFAULT_ASSIGNMENTS: SensorAssignments = { ...MPR121_LEGACY_ASSIGNMENTS };
 
 function getBackendUrl(): string {
   if (process.env.EXPO_PUBLIC_DOMAIN) {
@@ -231,8 +229,11 @@ class ArduinoSerialManager {
   private modeListeners: Set<(mode: ArduinoConnectionMode) => void> = new Set();
   private serialLog: SerialLogEntry[] = [];
   private maxSerialLogLines = 500;
-  private channels: SensorChannel[] = ARDUINO_CHANNELS.map(c => ({ ...c }));
-  private assignments: SensorAssignments = { ...DEFAULT_ASSIGNMENTS };
+  private channels: SensorChannel[] = buildRuntimeChannels(MPR121_LEGACY_CHANNELS);
+  private assignments: SensorAssignments = { ...MPR121_LEGACY_ASSIGNMENTS };
+  private profileId: HardwareProfileId = DEFAULT_HARDWARE_PROFILE_ID;
+  private profileListeners: Set<(profileId: HardwareProfileId) => void> = new Set();
+  private pendingProfileDetect: HardwareProfileId | null = null;
   private ws: WebSocket | null = null;
   private wsReconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private wsConnected = false;
@@ -315,6 +316,7 @@ class ArduinoSerialManager {
         this.preferredConnection = 'webserial';
       }
     } catch { }
+    await this.loadHardwareProfile();
   }
 
   private shouldUseWebSerial(pref: PreferredConnection): boolean {
@@ -415,6 +417,127 @@ class ArduinoSerialManager {
     return this.channels.map(c => ({ ...c }));
   }
 
+  getHardwareProfileId(): HardwareProfileId {
+    return this.profileId;
+  }
+
+  getFirmwarePath(): string {
+    return getHardwareProfile(this.profileId).firmwarePath;
+  }
+
+  getPendingProfileDetect(): HardwareProfileId | null {
+    return this.pendingProfileDetect;
+  }
+
+  clearPendingProfileDetect() {
+    this.pendingProfileDetect = null;
+  }
+
+  onProfileChange(callback: (profileId: HardwareProfileId) => void): () => void {
+    this.profileListeners.add(callback);
+    return () => this.profileListeners.delete(callback);
+  }
+
+  private applyProfile(profileId: HardwareProfileId, resetAssignments: boolean) {
+    this.profileId = profileId;
+    const profile = getHardwareProfile(profileId);
+    this.channels = profile.channels.map(ch => ({
+      ...ch,
+      type: ch.type as SensorChannel['type'],
+      active: false,
+      currentValue: 0,
+      inverted: this.channelInverts[ch.index] === true,
+    }));
+    if (resetAssignments) {
+      this.assignments = { ...profile.defaultAssignments };
+    }
+    const profileForceMin = profile.forceScale?.defaultMinPeak;
+    if (profileForceMin !== undefined) {
+      this.forceMinPeak = profileForceMin;
+    }
+    this.assignmentListeners.forEach(cb => cb(this.assignments));
+    this.profileListeners.forEach(cb => cb(profileId));
+  }
+
+  async setHardwareProfile(
+    profileId: HardwareProfileId,
+    resetAssignments = true,
+    persist = true,
+  ): Promise<void> {
+    if (profileId === this.profileId && !resetAssignments) return;
+    this.applyProfile(profileId, resetAssignments);
+    if (resetAssignments) {
+      await this.persistAssignments();
+    } else {
+      await this.loadAssignmentsForProfile(profileId);
+    }
+    await this.loadForceMinPeakForProfile();
+    if (persist) {
+      await AsyncStorage.setItem(HARDWARE_PROFILE_KEY, profileId);
+    }
+  }
+
+  async loadHardwareProfile(): Promise<void> {
+    try {
+      const stored = await AsyncStorage.getItem(HARDWARE_PROFILE_KEY);
+      const profileId = stored && isHardwareProfileId(stored)
+        ? stored
+        : DEFAULT_HARDWARE_PROFILE_ID;
+      this.applyProfile(profileId, false);
+      await this.loadAssignmentsForProfile(profileId);
+      await this.loadForceMinPeakForProfile();
+    } catch {
+      this.applyProfile(DEFAULT_HARDWARE_PROFILE_ID, false);
+    }
+  }
+
+  private async loadAssignmentsForProfile(profileId: HardwareProfileId): Promise<void> {
+    try {
+      const raw = await AsyncStorage.getItem(assignmentsStorageKey(profileId));
+      if (!raw) {
+        this.assignments = { ...getHardwareProfile(profileId).defaultAssignments };
+        this.assignmentListeners.forEach(cb => cb(this.assignments));
+        return;
+      }
+      const parsed = JSON.parse(raw) as Partial<SensorAssignments>;
+      this.assignments = {
+        ...getHardwareProfile(profileId).defaultAssignments,
+        ...parsed,
+      };
+      this.assignmentListeners.forEach(cb => cb(this.assignments));
+    } catch {
+      this.assignments = { ...getHardwareProfile(profileId).defaultAssignments };
+      this.assignmentListeners.forEach(cb => cb(this.assignments));
+    }
+  }
+
+  private async persistAssignments(): Promise<void> {
+    try {
+      await AsyncStorage.setItem(
+        assignmentsStorageKey(this.profileId),
+        JSON.stringify(this.assignments),
+      );
+    } catch { }
+  }
+
+  private forceMinPeakStorageKey(): string {
+    return `${FORCE_MIN_PEAK_KEY}_${this.profileId}`;
+  }
+
+  private async loadForceMinPeakForProfile(): Promise<void> {
+    try {
+      const raw = await AsyncStorage.getItem(this.forceMinPeakStorageKey());
+      if (raw !== null) {
+        this.forceMinPeak = parseFloat(raw) || getHardwareProfile(this.profileId).forceScale?.defaultMinPeak || 1.5;
+        return;
+      }
+      const profileDefault = getHardwareProfile(this.profileId).forceScale?.defaultMinPeak;
+      if (profileDefault !== undefined) {
+        this.forceMinPeak = profileDefault;
+      }
+    } catch { }
+  }
+
   getAssignments(): SensorAssignments {
     return { ...this.assignments };
   }
@@ -422,6 +545,7 @@ class ArduinoSerialManager {
   setAssignment(fn: CPRFunction, channelIndex: number | null) {
     this.assignments[fn] = channelIndex;
     this.assignmentListeners.forEach(cb => cb(this.assignments));
+    this.persistAssignments().catch(() => { });
   }
 
   onAssignmentChange(callback: (assignments: SensorAssignments) => void): () => void {
@@ -467,10 +591,10 @@ class ArduinoSerialManager {
     if (!this.channelInverts[channelIndex]) return rawValue;
     const ch = this.channels[channelIndex];
     if (!ch) return rawValue;
-    if (ch.type === 'digital' || ch.type === 'i2c_touch') {
+    if (ch.type === 'digital' || ch.type === 'i2c_touch' || ch.type === 'analog_touch') {
       return rawValue > 0 ? 0 : 1;
     }
-    const maxRange = ch.type === 'ultrasonic' ? 400 : ch.type === 'analog' ? 5 : 1;
+    const maxRange = ch.type === 'ultrasonic' ? 400 : ch.type === 'force' ? 600 : ch.type === 'analog' ? 5 : 1;
     return maxRange - rawValue;
   }
 
@@ -500,14 +624,16 @@ class ArduinoSerialManager {
     return this.channels.map(ch => ({
       id: `channel_${ch.index}`,
       name: ch.name,
-      type: ch.type as any,
+      type: ch.type as SensorInfo['type'],
       pin: ch.pin,
       description: ch.description,
       unit: ch.unit,
       active: ch.active,
-      currentValue: (ch.type === 'i2c_touch' || ch.type === 'digital') ? ch.currentValue > 0 : ch.currentValue,
-      minValue: ch.type === 'ultrasonic' ? 0 : ch.type === 'analog' ? 0 : undefined,
-      maxValue: ch.type === 'ultrasonic' ? 400 : ch.type === 'analog' ? 5 : undefined,
+      currentValue: (ch.type === 'i2c_touch' || ch.type === 'digital' || ch.type === 'analog_touch')
+        ? ch.currentValue > 0
+        : ch.currentValue,
+      minValue: ch.type === 'ultrasonic' || ch.type === 'force' ? 0 : ch.type === 'analog' ? 0 : undefined,
+      maxValue: ch.type === 'ultrasonic' ? 400 : ch.type === 'force' ? 600 : ch.type === 'analog' ? 5 : undefined,
     }));
   }
 
@@ -606,7 +732,11 @@ class ArduinoSerialManager {
     const forceVal = Math.max(0, rawForce - this.forceOffset);
 
     const rawPressure = getVal('breathPressure');
-    const pressureVal = Math.max(0, rawPressure - this.breathOffset);
+    const pressureForDetection = Math.max(0, rawPressure - this.breathOffset);
+    const profile = getHardwareProfile(this.profileId);
+    const pressureVal = profile.breathInput === 'voltage' && profile.breathVoltageToCmH2O
+      ? pressureForDetection * profile.breathVoltageToCmH2O
+      : pressureForDetection;
 
     let compressionDetected = false;
     let emitDepthPeak = 0;
@@ -637,7 +767,7 @@ class ArduinoSerialManager {
         }
       }
     } else if (this.phase === 'BREATH') {
-      breathDetected = this.detectBreathCycle(pressureVal);
+      breathDetected = this.detectBreathCycle(pressureForDetection);
 
       if (breathDetected) {
         this.cycleBreathCount++;
@@ -683,21 +813,31 @@ class ArduinoSerialManager {
 
   private applyInversion(ch: SensorChannel, val: number): number {
     if (!ch.inverted) return val;
-    if (ch.type === 'i2c_touch' || ch.type === 'digital') {
+    if (ch.type === 'i2c_touch' || ch.type === 'digital' || ch.type === 'analog_touch') {
       return val > 0 ? 0 : 1;
     }
-    const maxVal = ch.type === 'ultrasonic' ? 400 : 5;
+    const maxVal = ch.type === 'ultrasonic' ? 400 : ch.type === 'force' ? 600 : ch.type === 'analog' ? 5 : 1;
     return Math.max(0, maxVal - val);
+  }
+
+  private normalizeChannelValue(ch: SensorChannel, rawVal: number): number {
+    if (ch.type === 'analog_touch' && rawVal > 1) {
+      const threshold = getHardwareProfile(this.profileId).analogTouchThreshold ?? 512;
+      return rawVal >= threshold ? 1 : 0;
+    }
+    return rawVal;
   }
 
   private updateChannelsFromRaw(rawChannels: number[]) {
     this.channels = this.channels.map((ch, i) => {
       const rawVal = i < rawChannels.length ? rawChannels[i] : 0;
-      const val = this.applyInversion(ch, rawVal);
+      const normalized = this.normalizeChannelValue(ch, rawVal);
+      const val = this.applyInversion(ch, normalized);
+      const isBinary = ch.type === 'i2c_touch' || ch.type === 'digital' || ch.type === 'analog_touch';
       return {
         ...ch,
         currentValue: val,
-        active: val > 0,
+        active: isBinary ? val > 0 : val > 0,
       };
     });
   }
@@ -795,7 +935,7 @@ class ArduinoSerialManager {
 
   setForceMinPeak(v: number) {
     this.forceMinPeak = Math.max(0.1, v);
-    AsyncStorage.setItem(FORCE_MIN_PEAK_KEY, String(this.forceMinPeak)).catch(() => { });
+    AsyncStorage.setItem(this.forceMinPeakStorageKey(), String(this.forceMinPeak)).catch(() => { });
   }
 
   calibrateForce() {
@@ -1007,16 +1147,15 @@ class ArduinoSerialManager {
 
   async loadOffsets(): Promise<void> {
     try {
-      const [uRaw, bRaw, fRaw, fMinRaw] = await Promise.all([
+      const [uRaw, bRaw, fRaw] = await Promise.all([
         AsyncStorage.getItem(ULTRASONIC_OFFSET_KEY),
         AsyncStorage.getItem(BREATH_OFFSET_KEY),
         AsyncStorage.getItem(FORCE_OFFSET_KEY),
-        AsyncStorage.getItem(FORCE_MIN_PEAK_KEY),
       ]);
       if (uRaw !== null) this.ultrasonicOffset = parseFloat(uRaw) || 0;
       if (bRaw !== null) this.breathOffset = parseFloat(bRaw) || 0;
       if (fRaw !== null) this.forceOffset = parseFloat(fRaw) || 0;
-      if (fMinRaw !== null) this.forceMinPeak = parseFloat(fMinRaw) || 1.5;
+      await this.loadForceMinPeakForProfile();
       this.offsetListeners.forEach(cb => cb(this.ultrasonicOffset, this.breathOffset));
     } catch { }
   }
@@ -1329,6 +1468,18 @@ class ArduinoSerialManager {
   //this funcation is handling Arduino Data
   private handleArduinoLine(line: string) {
     this.addSerialLine(line, 'rx');
+    const trimmed = line.trim();
+    if (trimmed.startsWith('# PROFILE ')) {
+      const detectedId = trimmed.slice('# PROFILE '.length).trim();
+      if (isHardwareProfileId(detectedId)) {
+        if (this.status === 'disconnected' && detectedId !== this.profileId) {
+          this.setHardwareProfile(detectedId, true).catch(() => { });
+        } else if (detectedId !== this.profileId) {
+          this.pendingProfileDetect = detectedId;
+        }
+      }
+      return;
+    }
     const parts = line.split(',').map(s => parseFloat(s.trim()));
     if (parts.length >= 7 && !parts.some(isNaN)) {
       const rawChannels: number[] = [];
@@ -1445,7 +1596,7 @@ class ArduinoSerialManager {
 
     this.stopSimulation();
     this.setStatus('disconnected');
-    this.channels = ARDUINO_CHANNELS.map(c => ({ ...c }));
+    this.channels = buildRuntimeChannels(getHardwareProfile(this.profileId).channels);
     this.setMode('simulation');
     this.lastCompressionTime = 0;
     this.compressionRate = 0;
@@ -1649,4 +1800,12 @@ class ArduinoSerialManager {
 }
 
 export const arduinoSerial = new ArduinoSerialManager();
-export { DEFAULT_SENSOR_DATA, DEFAULT_CONFIG, DEFAULT_BAUD_RATE, ARDUINO_CHANNELS, DEFAULT_ASSIGNMENTS };
+export {
+  DEFAULT_SENSOR_DATA,
+  DEFAULT_CONFIG,
+  DEFAULT_BAUD_RATE,
+  ARDUINO_CHANNELS,
+  DEFAULT_ASSIGNMENTS,
+};
+export type { HardwareProfileId } from './hardware-profiles';
+export { HARDWARE_PROFILE_LIST, getHardwareProfile } from './hardware-profiles';

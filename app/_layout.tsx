@@ -25,9 +25,10 @@ function RootLayoutNav() {
 
 export default function RootLayout() {
   useEffect(() => {
-    arduinoSerial.loadInverts().catch(() => {});
-    arduinoSerial.loadOffsets().catch(() => {});
-    arduinoSerial.loadPreferences().catch(() => {});
+    arduinoSerial.loadPreferences()
+      .then(() => arduinoSerial.loadOffsets())
+      .then(() => arduinoSerial.loadInverts())
+      .catch(() => {});
     videoAssignments.load().catch(() => {});
     SplashScreen.hideAsync();
     if (Platform.OS === 'android') {
