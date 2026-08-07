@@ -1,6 +1,6 @@
 import { Platform } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { nativeUsbSerial, type UsbDevice } from './usb-serial';
+import { nativeUsbSerial, pickPreferredUsbDevice, type UsbDevice } from './usb-serial';
 import { bleSerial, type BleDevice } from './ble-serial';
 import { tcpSerial, type TcpConfig } from './tcp-serial';
 import { webSerial } from './webserial';
@@ -159,6 +159,9 @@ type SerialLineCallback = (entry: SerialLogEntry) => void;
 type HardwareOnlyCallback = (hardwareOnly: boolean) => void;
 
 const DEFAULT_BAUD_RATE = 115200;
+const RX_WATCHDOG_MS = 1500;
+const NO_RX_ERROR =
+  'Port open but no serial data — check baud 115200 / cable / Mega firmware';
 
 const DEFAULT_CONFIG: ArduinoConfig = {
   baudRate: DEFAULT_BAUD_RATE,
@@ -263,6 +266,9 @@ class ArduinoSerialManager {
   private forceOffset = 0;
   private forceMinPeak = 50;
   private offsetListeners: Set<(ultrasonicOffset: number, breathOffset: number) => void> = new Set();
+  private lastConnectionError = '';
+  private rxSinceConnect = false;
+  private errorListeners: Set<(message: string) => void> = new Set();
 
   private simulationInterval: ReturnType<typeof setInterval> | null = null;
   private simCompressionWaveTimer: ReturnType<typeof setTimeout> | null = null;
@@ -281,6 +287,78 @@ class ArduinoSerialManager {
 
   getStatus(): ArduinoConnectionStatus {
     return this.status;
+  }
+
+  getLastConnectionError(): string {
+    return this.lastConnectionError;
+  }
+
+  onConnectionErrorChange(callback: (message: string) => void): () => void {
+    this.errorListeners.add(callback);
+    return () => this.errorListeners.delete(callback);
+  }
+
+  private setConnectionError(message: string) {
+    this.lastConnectionError = message;
+    this.errorListeners.forEach(cb => cb(message));
+  }
+
+  private clearConnectionError() {
+    if (!this.lastConnectionError) return;
+    this.lastConnectionError = '';
+    this.errorListeners.forEach(cb => cb(''));
+  }
+
+  private markRxReceived() {
+    this.rxSinceConnect = true;
+  }
+
+  private async waitForInitialRx(timeoutMs: number): Promise<boolean> {
+    if (this.rxSinceConnect) return true;
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      if (this.rxSinceConnect) return true;
+      await new Promise(r => setTimeout(r, 50));
+    }
+    return this.rxSinceConnect;
+  }
+
+  private async finalizeTransportConnect(mode: ArduinoConnectionMode): Promise<boolean> {
+    this.rxSinceConnect = false;
+    this.setMode(mode);
+    this.setStatus('connected');
+    this.clearConnectionError();
+
+    const gotRx = await this.waitForInitialRx(RX_WATCHDOG_MS);
+    if (!gotRx) {
+      this.setConnectionError(NO_RX_ERROR);
+      this.setStatus('error');
+      this.disconnectActiveTransport(mode);
+      return false;
+    }
+
+    console.log('[Arduino] Connected via', mode);
+    return true;
+  }
+
+  private disconnectActiveTransport(mode: ArduinoConnectionMode) {
+    switch (mode) {
+      case 'usb':
+        nativeUsbSerial.disconnect();
+        this.cleanupUsb();
+        break;
+      case 'ble':
+        bleSerial.disconnect();
+        this.cleanupBle();
+        break;
+      case 'tcp':
+        tcpSerial.disconnect();
+        this.cleanupTcp();
+        break;
+      case 'webserial':
+        webSerial.disconnect();
+        break;
+    }
   }
 
   getMode(): ArduinoConnectionMode {
@@ -327,6 +405,9 @@ class ArduinoSerialManager {
 
   private async fallbackSimulationOrError(): Promise<boolean> {
     if (this._hardwareOnly) {
+      if (!this.lastConnectionError) {
+        this.setConnectionError('No hardware connection available');
+      }
       this.setStatus('error');
       return false;
     }
@@ -960,16 +1041,37 @@ class ArduinoSerialManager {
     forcePeak: number;
   } {
     const forceDedicated = this.isDedicatedForceChannel();
+    const depthAssigned = this.assignments.compressionDepth !== null;
+
+    if (forceDedicated && depthAssigned) {
+      const forceResult = this.detectForceOnlyCycle(forceVal);
+      const depthResult = this.detectDepthOnlyCycle(depthVal, forceVal);
+      if (forceResult.detected || depthResult.detected) {
+        return {
+          detected: true,
+          depthPeak: depthResult.depthPeak,
+          forcePeak: forceResult.forcePeak,
+        };
+      }
+      return { detected: false, depthPeak: 0, forcePeak: 0 };
+    }
 
     if (forceDedicated) {
       return this.detectForceOnlyCycle(forceVal);
     }
 
-    const depthAssigned = this.assignments.compressionDepth !== null;
     if (!depthAssigned) {
       return { detected: false, depthPeak: 0, forcePeak: 0 };
     }
 
+    return this.detectDepthOnlyCycle(depthVal, forceVal);
+  }
+
+  private detectDepthOnlyCycle(depthVal: number, forceVal: number): {
+    detected: boolean;
+    depthPeak: number;
+    forcePeak: number;
+  } {
     const thresholdStart = 6;
     const thresholdEnd = 5.2;
     let detected = false;
@@ -1324,12 +1426,15 @@ class ArduinoSerialManager {
 
       if (devices.length === 0) {
         console.log('[Arduino] No USB devices found');
+        this.setConnectionError('No USB devices found — check OTG cable and power');
         return false;
       }
 
-      const device = this.selectedUsbDeviceId !== null
-        ? devices.find(d => d.deviceId === this.selectedUsbDeviceId) || devices[0]
-        : devices[0];
+      const device = pickPreferredUsbDevice(devices, this.selectedUsbDeviceId);
+      if (!device) {
+        this.setConnectionError('No USB devices found');
+        return false;
+      }
       console.log('[Arduino] Found USB device:', device.name, 'id:', device.deviceId);
 
       this.usbDataUnsub = nativeUsbSerial.onData((line: string) => {
@@ -1339,24 +1444,25 @@ class ArduinoSerialManager {
       this.usbStatusUnsub = nativeUsbSerial.onStatusChange((status, message) => {
         if (status === 'disconnected' || status === 'error') {
           console.log('[Arduino USB] Status:', status, message);
+          if (message) {
+            this.setConnectionError(message);
+          }
           this.setStatus(status === 'error' ? 'error' : 'disconnected');
-          this.setMode('simulation');
           this.cleanupUsb();
         }
       });
 
       const ok = await nativeUsbSerial.connect(device.deviceId, this.config.baudRate);
       if (ok) {
-        this.setMode('usb');
-        this.setStatus('connected');
-        console.log('[Arduino] Connected via USB OTG');
-        return true;
+        return await this.finalizeTransportConnect('usb');
       }
 
+      this.setConnectionError(nativeUsbSerial.getLastError() || 'USB connection failed');
       this.cleanupUsb();
       return false;
     } catch (e) {
       console.log('[Arduino] USB connection error:', e);
+      this.setConnectionError('USB connection error');
       this.cleanupUsb();
       return false;
     }
@@ -1391,18 +1497,15 @@ class ArduinoSerialManager {
       this.bleDataUnsub = bleSerial.onData((line) => this.handleArduinoLine(line));
       this.bleStatusUnsub = bleSerial.onStatusChange((status, message) => {
         if (status === 'disconnected' || status === 'error') {
+          if (message) this.setConnectionError(message);
           this.setStatus(status === 'error' ? 'error' : 'disconnected');
-          this.setMode('simulation');
           this.cleanupBle();
         }
       });
 
       const ok = await bleSerial.connect(this.selectedBleDeviceId);
       if (ok) {
-        this.setMode('ble');
-        this.setStatus('connected');
-        console.log('[Arduino] Connected via Bluetooth LE');
-        return true;
+        return await this.finalizeTransportConnect('ble');
       }
 
       this.cleanupBle();
@@ -1419,18 +1522,15 @@ class ArduinoSerialManager {
       this.tcpDataUnsub = tcpSerial.onData((line) => this.handleArduinoLine(line));
       this.tcpStatusUnsub = tcpSerial.onStatusChange((status, message) => {
         if (status === 'disconnected' || status === 'error') {
+          if (message) this.setConnectionError(message);
           this.setStatus(status === 'error' ? 'error' : 'disconnected');
-          this.setMode('simulation');
           this.cleanupTcp();
         }
       });
 
       const ok = await tcpSerial.connect();
       if (ok) {
-        this.setMode('tcp');
-        this.setStatus('connected');
-        console.log('[Arduino] Connected via TCP/WiFi');
-        return true;
+        return await this.finalizeTransportConnect('tcp');
       }
 
       this.cleanupTcp();
@@ -1445,36 +1545,61 @@ class ArduinoSerialManager {
   private async connectWebSerialMode(): Promise<boolean> {
     if (!webSerial.isAvailable()) return false;
 
+    let unsubData: (() => void) | null = null;
+    let unsubStatus: (() => void) | null = null;
+
     try {
-      const unsubData = webSerial.onData((line) => this.handleArduinoLine(line));
-      const unsubStatus = webSerial.onStatusChange((status, message) => {
+      unsubData = webSerial.onData((line) => this.handleArduinoLine(line));
+      unsubStatus = webSerial.onStatusChange((status, message) => {
         if (status === 'disconnected' || status === 'error') {
+          if (message) this.setConnectionError(message);
           this.setStatus(status === 'error' ? 'error' : 'disconnected');
-          this.setMode('simulation');
-          unsubData();
-          unsubStatus();
+          unsubData?.();
+          unsubStatus?.();
         }
       });
 
-      const ok = await webSerial.connect(this.config.baudRate);
+      let ok = await webSerial.connect(this.config.baudRate);
       if (ok) {
-        this.setMode('webserial');
-        this.setStatus('connected');
-        console.log('[Arduino] Connected via Web Serial API');
+        let finalized = await this.finalizeTransportConnect('webserial');
+        if (!finalized && await webSerial.tryNextGrantedPort(this.config.baudRate)) {
+          this.rxSinceConnect = false;
+          finalized = await this.waitForInitialRx(RX_WATCHDOG_MS);
+          if (!finalized) {
+            this.setConnectionError(NO_RX_ERROR);
+            this.setStatus('error');
+            webSerial.disconnect();
+            unsubData?.();
+            unsubStatus?.();
+            return false;
+          }
+          this.setMode('webserial');
+          this.setStatus('connected');
+          return true;
+        }
+        if (!finalized) {
+          unsubData?.();
+          unsubStatus?.();
+          return false;
+        }
         return true;
       }
 
-      unsubData();
-      unsubStatus();
+      this.setConnectionError(webSerial.getLastError() || 'Web Serial connection failed');
+      unsubData?.();
+      unsubStatus?.();
       return false;
     } catch (e) {
       console.log('[Arduino] WebSerial connection error:', e);
+      unsubData?.();
+      unsubStatus?.();
       return false;
     }
   }
 
   private tryApplyProfileBanner(trimmed: string): boolean {
     if (!trimmed.startsWith('# PROFILE ')) return false;
+    this.markRxReceived();
     this.addSerialLine(trimmed, 'rx');
     const detectedId = trimmed.slice('# PROFILE '.length).trim();
     if (isHardwareProfileId(detectedId) && detectedId !== this.profileId) {
@@ -1490,6 +1615,7 @@ class ArduinoSerialManager {
 
   //this funcation is handling Arduino Data
   private handleArduinoLine(line: string) {
+    this.markRxReceived();
     const trimmed = line.trim();
     if (this.tryApplyProfileBanner(trimmed)) {
       return;
@@ -1509,6 +1635,7 @@ class ArduinoSerialManager {
 
   async connect(): Promise<boolean> {
     this.setStatus('connecting');
+    this.clearConnectionError();
     const pref = this.preferredConnection;
 
     if (Platform.OS === 'web') {
@@ -1554,6 +1681,14 @@ class ArduinoSerialManager {
     }
 
     if (pref === 'auto') {
+      if (bleSerial.isAvailable()) {
+        const bleOk = await this.connectBle();
+        if (bleOk) return true;
+        console.log('[Arduino] BLE failed, trying TCP...');
+      }
+      const tcpOk = await this.connectTcpMode();
+      if (tcpOk) return true;
+      console.log('[Arduino] TCP failed, trying WebSocket...');
       return this.connectWsFallback();
     }
 

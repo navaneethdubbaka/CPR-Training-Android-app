@@ -678,6 +678,7 @@ export function SettingsModal({ visible, onClose, connectionStatus, onConnect, o
   const [tcpConfig, setTcpConfig] = useState(arduinoSerial.getTcpConfig());
   const [hardwareProfileId, setHardwareProfileId] = useState<HardwareProfileId>(arduinoSerial.getHardwareProfileId());
   const [forceMinPeakInput, setForceMinPeakInput] = useState(String(arduinoSerial.getForceMinPeak()));
+  const [connectionError, setConnectionError] = useState(arduinoSerial.getLastConnectionError());
   const [profileAutoNotice, setProfileAutoNotice] = useState<string | null>(null);
   const isConnected = connectionStatus === 'connected';
   const isWeb = Platform.OS === 'web';
@@ -723,6 +724,11 @@ export function SettingsModal({ visible, onClose, connectionStatus, onConnect, o
       setForceMinPeakInput(String(arduinoSerial.getForceMinPeak()));
     });
 
+    const unsubError = arduinoSerial.onConnectionErrorChange((message) => {
+      setConnectionError(message);
+    });
+    setConnectionError(arduinoSerial.getLastConnectionError());
+
     const profileNoticeInterval = setInterval(() => {
       const notice = arduinoSerial.getAutoProfileSwitchNotice();
       if (notice) {
@@ -757,6 +763,7 @@ export function SettingsModal({ visible, onClose, connectionStatus, onConnect, o
       unsubInvert();
       unsubOffset();
       unsubProfile();
+      unsubError();
       clearInterval(profileNoticeInterval);
       unsubVideos();
       if (sensorPollRef.current) {
@@ -1137,7 +1144,7 @@ export function SettingsModal({ visible, onClose, connectionStatus, onConnect, o
                             {isConnected
                               ? `${getConnectedModeLabel(connectionMode, isWeb)} | ${config.baudRate} baud`
                               : connectionStatus === 'error'
-                                ? getDisconnectedHint(preferredConnection, hardwareOnly, isWeb)
+                                ? (connectionError || getDisconnectedHint(preferredConnection, hardwareOnly, isWeb))
                                 : isWeb && (preferredConnection === 'webserial' || preferredConnection === 'usb' || preferredConnection === 'auto')
                                   ? 'Plug in Arduino via USB, then tap Connect'
                                   : 'No device detected'}

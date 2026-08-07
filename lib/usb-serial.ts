@@ -10,7 +10,7 @@ export interface UsbDevice {
 export type UsbDataCallback = (line: string) => void;
 export type UsbStatusCallback = (status: 'connected' | 'disconnected' | 'error', message?: string) => void;
 
-const ARDUINO_VENDOR_IDS = [0x2341, 0x2A03, 0x1A86, 0x0403, 0x10C4, 0x067B];
+export const ARDUINO_VENDOR_IDS = [0x2341, 0x2A03, 0x1A86, 0x0403, 0x10C4, 0x067B];
 
 const ARDUINO_PRODUCT_NAMES: Record<number, Record<number, string>> = {
   0x2341: {
@@ -58,6 +58,23 @@ function getDeviceName(vendorId: number, productId: number): string {
   return `USB Device (${vendorId.toString(16)}:${productId.toString(16)})`;
 }
 
+export function pickPreferredUsbDevice(
+  devices: UsbDevice[],
+  selectedDeviceId: number | null,
+): UsbDevice | null {
+  if (devices.length === 0) return null;
+
+  const arduinoDevice = devices.find(d => ARDUINO_VENDOR_IDS.includes(d.vendorId));
+  if (arduinoDevice) return arduinoDevice;
+
+  if (selectedDeviceId !== null) {
+    const selected = devices.find(d => d.deviceId === selectedDeviceId);
+    if (selected) return selected;
+  }
+
+  return devices[0];
+}
+
 function hexToString(hex: string): string {
   let str = '';
   for (let i = 0; i < hex.length; i += 2) {
@@ -77,6 +94,10 @@ function stringToHex(str: string): string {
   return hex;
 }
 
+function sleep(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
 class NativeUsbSerialManager {
   private usbSerial: any = null;
   private dataSubscription: any = null;
@@ -87,9 +108,14 @@ class NativeUsbSerialManager {
   private _isAvailable = Platform.OS === 'android';
   private UsbSerialManagerModule: any = null;
   private ParityEnum: any = null;
+  private lastError = '';
 
   isAvailable(): boolean {
     return this._isAvailable;
+  }
+
+  getLastError(): string {
+    return this.lastError;
   }
 
   private async loadModule(): Promise<boolean> {
@@ -125,16 +151,33 @@ class NativeUsbSerialManager {
     }
   }
 
+  private async requestPermissionWithRetry(deviceId: number, timeoutMs = 3000): Promise<boolean> {
+    let granted = await this.UsbSerialManagerModule.tryRequestPermission(deviceId);
+    if (granted) return true;
+
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      await sleep(300);
+      granted = await this.UsbSerialManagerModule.tryRequestPermission(deviceId);
+      if (granted) return true;
+    }
+    return false;
+  }
+
   async connect(deviceId: number, baudRate: number = 115200): Promise<boolean> {
-    if (!await this.loadModule()) return false;
+    if (!await this.loadModule()) {
+      this.lastError = 'USB serial module not available';
+      return false;
+    }
 
     try {
       this.disconnect();
 
-      const hasPermission = await this.UsbSerialManagerModule.tryRequestPermission(deviceId);
+      const hasPermission = await this.requestPermissionWithRetry(deviceId);
       if (!hasPermission) {
-        console.log('[USB Serial] Permission request sent, waiting for user approval');
-        this.emitStatus('disconnected', 'Permission required');
+        this.lastError = 'USB permission required — grant access on the device, then tap Connect again';
+        console.log('[USB Serial] Permission not granted after retry');
+        this.emitStatus('disconnected', this.lastError);
         return false;
       }
 
@@ -147,6 +190,7 @@ class NativeUsbSerialManager {
 
       this.connectedDeviceId = deviceId;
       this.lineBuffer = '';
+      this.lastError = '';
 
       this.dataSubscription = this.usbSerial.onReceived((event: any) => {
         const text = hexToString(event.data);
@@ -157,8 +201,9 @@ class NativeUsbSerialManager {
       console.log('[USB Serial] Connected to device:', deviceId);
       return true;
     } catch (e: any) {
+      this.lastError = e.message || 'Connection failed';
       console.log('[USB Serial] Connection error:', e);
-      this.emitStatus('error', e.message || 'Connection failed');
+      this.emitStatus('error', this.lastError);
       return false;
     }
   }

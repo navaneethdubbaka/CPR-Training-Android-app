@@ -1,6 +1,8 @@
 export type WebSerialDataCallback = (line: string) => void;
 export type WebSerialStatusCallback = (status: 'connected' | 'disconnected' | 'error', message?: string) => void;
 
+const ARDUINO_VENDOR_IDS = [0x2341, 0x2A03, 0x1A86, 0x0403, 0x10C4, 0x067B];
+
 class WebSerialManager {
   private port: any = null;
   private reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
@@ -10,9 +12,15 @@ class WebSerialManager {
   private dataCallbacks: Set<WebSerialDataCallback> = new Set();
   private statusCallbacks: Set<WebSerialStatusCallback> = new Set();
   private textDecoder = new TextDecoder();
+  private grantedPortIndex = 0;
+  private lastError = '';
 
   isAvailable(): boolean {
     return typeof navigator !== 'undefined' && 'serial' in navigator;
+  }
+
+  getLastError(): string {
+    return this.lastError;
   }
 
   onData(cb: WebSerialDataCallback): () => void {
@@ -39,48 +47,92 @@ class WebSerialManager {
     });
   }
 
+  private orderPortsByPreference(ports: any[]): any[] {
+    return [...ports].sort((a, b) => {
+      const aVid = a.getInfo?.()?.usbVendorId ?? -1;
+      const bVid = b.getInfo?.()?.usbVendorId ?? -1;
+      const aScore = ARDUINO_VENDOR_IDS.includes(aVid) ? 1 : 0;
+      const bScore = ARDUINO_VENDOR_IDS.includes(bVid) ? 1 : 0;
+      return bScore - aScore;
+    });
+  }
+
+  private pickPreferredPort(ports: any[]): any | null {
+    if (ports.length === 0) return null;
+    const ordered = this.orderPortsByPreference(ports);
+    return ordered[this.grantedPortIndex] ?? ordered[0];
+  }
+
+  private async openCurrentPort(baudRate: number): Promise<boolean> {
+    if (!this.port) return false;
+
+    await this.port.open({ baudRate });
+    this.writer = this.port.writable.getWriter();
+    this.emitStatus('connected');
+    console.log('[WebSerial] Connected at', baudRate, 'baud');
+    this.startReading();
+    return true;
+  }
+
   async connect(baudRate: number = 115200): Promise<boolean> {
     if (!this.isAvailable()) {
-      this.emitStatus('error', 'Web Serial not supported. Use Chrome on desktop.');
+      this.lastError = 'Web Serial not supported. Use Chrome on desktop.';
+      this.emitStatus('error', this.lastError);
       return false;
     }
 
     try {
-      await this.disconnect();
+      await this.disconnectInternal();
 
       const nav = navigator as any;
       const grantedPorts: any[] = await nav.serial.getPorts();
       if (grantedPorts.length > 0) {
-        this.port = grantedPorts[0];
+        const ordered = this.orderPortsByPreference(grantedPorts);
+        this.grantedPortIndex = Math.min(this.grantedPortIndex, ordered.length - 1);
+        this.port = ordered[this.grantedPortIndex];
       } else {
         this.port = await nav.serial.requestPort({
-          filters: [
-            { usbVendorId: 0x2341 },
-            { usbVendorId: 0x2A03 },
-            { usbVendorId: 0x1A86 },
-            { usbVendorId: 0x0403 },
-            { usbVendorId: 0x10C4 },
-            { usbVendorId: 0x067B },
-          ],
+          filters: ARDUINO_VENDOR_IDS.map(usbVendorId => ({ usbVendorId })),
         });
+        this.grantedPortIndex = 0;
       }
 
-      await this.port.open({ baudRate });
-
-      this.writer = this.port.writable.getWriter();
-      this.emitStatus('connected');
-      console.log('[WebSerial] Connected at', baudRate, 'baud');
-
-      this.startReading();
-      return true;
+      return await this.openCurrentPort(baudRate);
     } catch (e: any) {
       if (e.name === 'NotFoundError') {
-        this.emitStatus('error', 'No port selected');
+        this.lastError = 'No port selected';
+        this.emitStatus('error', this.lastError);
       } else {
-        this.emitStatus('error', e.message);
+        this.lastError = e.message || 'Web Serial connection failed';
+        this.emitStatus('error', this.lastError);
       }
       return false;
     }
+  }
+
+  async tryNextGrantedPort(baudRate: number = 115200): Promise<boolean> {
+    if (!this.isAvailable()) return false;
+
+    const nav = navigator as any;
+    const grantedPorts: any[] = await nav.serial.getPorts();
+    if (grantedPorts.length <= 1) return false;
+
+    const ordered = this.orderPortsByPreference(grantedPorts);
+    const startIndex = this.grantedPortIndex;
+
+    for (let i = 1; i < ordered.length; i++) {
+      const nextIndex = (startIndex + i) % ordered.length;
+      await this.disconnectInternal();
+      this.grantedPortIndex = nextIndex;
+      this.port = ordered[nextIndex];
+      try {
+        return await this.openCurrentPort(baudRate);
+      } catch (e: any) {
+        console.log('[WebSerial] Port rotation failed:', e);
+        this.lastError = e.message || 'Failed to open serial port';
+      }
+    }
+    return false;
   }
 
   private async startReading() {
@@ -99,7 +151,8 @@ class WebSerialManager {
       }
     } catch (e: any) {
       if (this.reading) {
-        this.emitStatus('error', e.message);
+        this.lastError = e.message || 'Serial read error';
+        this.emitStatus('error', this.lastError);
       }
     } finally {
       if (this.reader) {
@@ -121,7 +174,7 @@ class WebSerialManager {
     }
   }
 
-  async disconnect() {
+  private async disconnectInternal() {
     this.reading = false;
 
     if (this.reader) {
@@ -143,6 +196,11 @@ class WebSerialManager {
 
     this.lineBuffer = '';
     this.textDecoder = new TextDecoder();
+  }
+
+  async disconnect() {
+    await this.disconnectInternal();
+    this.grantedPortIndex = 0;
     this.emitStatus('disconnected');
   }
 

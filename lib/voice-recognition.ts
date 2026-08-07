@@ -149,6 +149,11 @@ class VoiceRecognitionManager {
     }
   }
 
+  async prewarm(): Promise<void> {
+    if (Platform.OS === 'web') return;
+    await getSpeechRecognitionModule();
+  }
+
   async isAvailable(): Promise<boolean> {
     if (Platform.OS === 'web') {
       return typeof window !== 'undefined' &&
@@ -185,7 +190,7 @@ class VoiceRecognitionManager {
 
     const recognition = new SpeechRecognition();
     recognition.lang = 'en-US';
-    recognition.continuous = false;
+    recognition.continuous = true;
     recognition.interimResults = true;
     recognition.maxAlternatives = 3;
     this.webRecognition = recognition;
@@ -296,7 +301,7 @@ class VoiceRecognitionManager {
       ExpoSpeechRecognitionModule.start({
         lang: 'en-US',
         interimResults: true,
-        continuous: false,
+        continuous: true,
         maxAlternatives: 1,
       });
     } catch (e: any) {

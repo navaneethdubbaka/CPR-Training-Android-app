@@ -12,6 +12,8 @@ import { ThemeProvider } from "@/contexts/ThemeContext";
 import { VoiceListeningProvider } from "@/contexts/VoiceListeningContext";
 import { arduinoSerial } from "@/lib/arduino-serial";
 import { videoAssignments } from "@/lib/video-assignments";
+import { ensureMicPermission } from "@/lib/microphone-permissions";
+import { voiceRecognition } from "@/lib/voice-recognition";
 
 SplashScreen.preventAutoHideAsync();
 
@@ -34,6 +36,18 @@ export default function RootLayout() {
     if (Platform.OS === 'android') {
       PermissionsAndroid.request(PermissionsAndroid.PERMISSIONS.CAMERA).catch((err) => {
         if (__DEV__) console.warn('[layout] camera permission request failed:', err);
+      });
+      ensureMicPermission().catch((err) => {
+        if (__DEV__) console.warn('[layout] microphone permission request failed:', err);
+      });
+    } else if (Platform.OS === 'ios') {
+      ensureMicPermission().catch((err) => {
+        if (__DEV__) console.warn('[layout] microphone permission request failed:', err);
+      });
+    }
+    if (Platform.OS !== 'web') {
+      voiceRecognition.prewarm().catch((err) => {
+        if (__DEV__) console.warn('[layout] voice recognition prewarm failed:', err);
       });
     }
   }, []);

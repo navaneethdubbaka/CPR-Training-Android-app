@@ -49,8 +49,20 @@ const HINT_TEXT: Record<VoiceMatchMode, string> = {
   help_shout: '"Help!" / "Someone help!" / "Emergency!"',
 };
 
-const RESTART_DELAY_MS = 2500;
-const AUTO_START_DELAY_MS = 800;
+const RESTART_DELAY_MS = 250;
+const AUTO_START_DELAY_MS = 150;
+
+function isRecoverableRecognitionIssue(error?: string): boolean {
+  if (!error) return true;
+  const e = error.toLowerCase();
+  return (
+    e.includes('no speech') ||
+    e.includes('no-speech') ||
+    e.includes('phrase not recognized') ||
+    e.includes('aborted') ||
+    e.includes('client')
+  );
+}
 
 const WaveBar = ({ index, isListening }: { index: number; isListening: boolean }) => {
   const height = useSharedValue(4);
@@ -104,6 +116,7 @@ export function VoicePrompt({
   disabled = false,
 }: VoicePromptProps) {
   const [micState, setMicState] = useState<MicState>('idle');
+  const [isMuted, setIsMuted] = useState(false);
   const [transcript, setTranscript] = useState('');
   const [heardText, setHeardText] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
@@ -112,8 +125,10 @@ export function VoicePrompt({
   const isMounted = useRef(true);
   const lastTranscriptRef = useRef('');
   const successFiredRef = useRef(false);
+  const isMutedRef = useRef(false);
   const restartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const micStateRef = useRef<MicState>('idle');
+  const startListeningRef = useRef<() => Promise<void>>(async () => {});
   const { setVoiceListening } = useVoiceListening();
 
   const clearRestartTimer = useCallback(() => {
@@ -124,6 +139,7 @@ export function VoicePrompt({
   }, []);
 
   const scheduleRestart = useCallback((fn: () => void) => {
+    if (isMutedRef.current) return;
     clearRestartTimer();
     restartTimerRef.current = setTimeout(fn, RESTART_DELAY_MS);
   }, [clearRestartTimer]);
@@ -156,7 +172,7 @@ export function VoicePrompt({
   const setMicStateSafe = useCallback((state: MicState) => {
     micStateRef.current = state;
     setMicState(state);
-    setVoiceListening(state === 'listening' || state === 'starting');
+    setVoiceListening(state === 'starting');
   }, [setVoiceListening]);
 
   const handlePermissionDenied = useCallback((status: MicPermissionStatus) => {
@@ -166,13 +182,24 @@ export function VoicePrompt({
     setMicStateSafe('permission_denied');
     setErrorMessage(
       status === 'blocked'
-        ? 'Microphone blocked � enable in Settings'
+        ? 'Microphone blocked — enable in Settings'
         : 'Microphone permission required',
     );
   }, [micPulse, setMicStateSafe]);
 
+  const quietRestart = useCallback(() => {
+    if (!isMounted.current || successFiredRef.current || isMutedRef.current) return;
+    setErrorMessage('');
+    setHeardText('');
+    scheduleRestart(() => {
+      if (isMounted.current && !successFiredRef.current && !isMutedRef.current) {
+        void startListeningRef.current();
+      }
+    });
+  }, [scheduleRestart]);
+
   const startListening = useCallback(async () => {
-    if (!isMounted.current || disabled || successFiredRef.current) return;
+    if (!isMounted.current || disabled || successFiredRef.current || isMutedRef.current) return;
 
     clearRestartTimer();
     setErrorMessage('');
@@ -231,10 +258,16 @@ export function VoicePrompt({
         }
       },
       onError: (error) => {
-        if (!isMounted.current || successFiredRef.current) return;
+        if (!isMounted.current || successFiredRef.current || isMutedRef.current) return;
         if (__DEV__) {
           console.warn('[VoicePrompt] recognition error:', error);
         }
+
+        if (isRecoverableRecognitionIssue(error)) {
+          quietRestart();
+          return;
+        }
+
         cancelAnimation(micPulse);
         micPulse.value = withTiming(1, { duration: 200 });
         setMicStateSafe('failed');
@@ -243,29 +276,15 @@ export function VoicePrompt({
         setHeardText(heard);
         onFailure?.(heard);
         Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-        scheduleRestart(() => {
-          if (isMounted.current && !successFiredRef.current) {
-            void startListening();
-          }
-        });
       },
       onEnd: () => {
-        if (!isMounted.current || successFiredRef.current) return;
+        if (!isMounted.current || successFiredRef.current || isMutedRef.current) return;
         setVoiceListening(false);
         const heard = lastTranscriptRef.current;
-        if (!checkMatch(heard) && micStateRef.current !== 'failed' && micStateRef.current !== 'permission_denied') {
-          cancelAnimation(micPulse);
-          micPulse.value = withTiming(1, { duration: 200 });
-          setMicStateSafe('failed');
-          setErrorMessage(heard ? 'Phrase not recognized' : 'No speech detected');
-          setHeardText(heard);
-          onFailure?.(heard);
-          Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
-          scheduleRestart(() => {
-            if (isMounted.current && !successFiredRef.current) {
-              void startListening();
-            }
-          });
+        if (checkMatch(heard)) return;
+
+        if (isRecoverableRecognitionIssue(heard ? 'phrase not recognized' : 'no speech detected')) {
+          quietRestart();
         }
       },
     });
@@ -275,7 +294,7 @@ export function VoicePrompt({
     onSuccess,
     onFailure,
     clearRestartTimer,
-    scheduleRestart,
+    quietRestart,
     handlePermissionDenied,
     setMicStateSafe,
     setVoiceListening,
@@ -283,13 +302,17 @@ export function VoicePrompt({
   ]);
 
   useEffect(() => {
-    if (autoStart && !disabled) {
+    startListeningRef.current = startListening;
+  }, [startListening]);
+
+  useEffect(() => {
+    if (autoStart && !disabled && !isMuted) {
       const t = setTimeout(() => {
         void startListening();
       }, AUTO_START_DELAY_MS);
       return () => clearTimeout(t);
     }
-  }, [autoStart, disabled, startListening]);
+  }, [autoStart, disabled, isMuted, startListening]);
 
   const micPulseStyle = useAnimatedStyle(() => ({
     transform: [{ scale: micPulse.value }],
@@ -306,10 +329,15 @@ export function VoicePrompt({
     micState === 'recognized' ? 'rgba(0, 200, 83, 0.15)' :
     micState === 'failed' || micState === 'permission_denied' ? 'rgba(255, 23, 68, 0.15)' :
     micState === 'listening' || micState === 'starting' ? 'rgba(229, 57, 53, 0.2)' :
+    isMuted ? 'rgba(255,255,255,0.03)' :
     'rgba(255,255,255,0.05)';
 
   const isListening = micState === 'listening';
   const hintText = matchMode !== 'phrase' ? HINT_TEXT[matchMode] : `"${targetPhrase}"`;
+
+  const idleBadgeText = isMuted
+    ? 'Mic muted — tap to resume'
+    : 'Listening will start automatically';
 
   return (
     <View style={styles.container}>
@@ -332,7 +360,7 @@ export function VoicePrompt({
           <View style={[styles.listeningBadge, styles.failedBadge]}>
             <MaterialCommunityIcons name="microphone-off" size={14} color={Colors.danger} />
             <Text style={[styles.listeningBadgeText, { color: Colors.danger }]}>
-              {errorMessage || 'Not recognized � try again'}
+              {errorMessage || 'Not recognized — try again'}
             </Text>
           </View>
         )}
@@ -346,8 +374,12 @@ export function VoicePrompt({
         )}
         {micState === 'idle' && (
           <View style={[styles.listeningBadge, styles.idleBadge]}>
-            <MaterialCommunityIcons name="microphone-outline" size={14} color={Colors.textMuted} />
-            <Text style={[styles.listeningBadgeText, { color: Colors.textMuted }]}>Tap mic to start</Text>
+            <MaterialCommunityIcons
+              name={isMuted ? 'microphone-off' : 'microphone-outline'}
+              size={14}
+              color={Colors.textMuted}
+            />
+            <Text style={[styles.listeningBadgeText, { color: Colors.textMuted }]}>{idleBadgeText}</Text>
           </View>
         )}
       </View>
@@ -382,9 +414,17 @@ export function VoicePrompt({
             if (disabled || successFiredRef.current) return;
             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
             if (micState === 'listening' || micState === 'starting') {
+              isMutedRef.current = true;
+              setIsMuted(true);
+              clearRestartTimer();
               void voiceRecognition.stopListening();
+              cancelAnimation(micPulse);
+              micPulse.value = withTiming(1, { duration: 200 });
               setMicStateSafe('idle');
+              setVoiceListening(false);
             } else {
+              isMutedRef.current = false;
+              setIsMuted(false);
               clearRestartTimer();
               void startListening();
             }
@@ -393,7 +433,7 @@ export function VoicePrompt({
         >
           <Animated.View style={[styles.micButton, { backgroundColor: micBgColor }, micPulseStyle]}>
             <MaterialCommunityIcons
-              name={isListening ? 'microphone' : 'microphone-outline'}
+              name={isMuted || micState === 'idle' ? 'microphone-off' : 'microphone'}
               size={28}
               color={micColor}
             />
