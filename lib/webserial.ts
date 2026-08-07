@@ -16,7 +16,19 @@ class WebSerialManager {
   private lastError = '';
 
   isAvailable(): boolean {
-    return typeof navigator !== 'undefined' && 'serial' in navigator;
+    if (typeof navigator === 'undefined' || !('serial' in navigator)) return false;
+    if (typeof window !== 'undefined' && !window.isSecureContext) return false;
+    return true;
+  }
+
+  getSecureContextHint(): string | null {
+    if (typeof window !== 'undefined' && !window.isSecureContext) {
+      return 'Web Serial requires HTTPS or localhost — open the app via http://localhost, not a LAN IP.';
+    }
+    if (!('serial' in navigator)) {
+      return 'Web Serial not supported. Use Chrome or Edge on desktop (not mobile).';
+    }
+    return null;
   }
 
   getLastError(): string {
@@ -74,33 +86,48 @@ class WebSerialManager {
     return true;
   }
 
-  async connect(baudRate: number = 115200): Promise<boolean> {
-    if (!this.isAvailable()) {
-      this.lastError = 'Web Serial not supported. Use Chrome on desktop.';
+  async connect(
+    baudRate: number = 115200,
+    options?: { promptPort?: boolean },
+  ): Promise<boolean> {
+    const secureHint = this.getSecureContextHint();
+    if (secureHint) {
+      this.lastError = secureHint;
       this.emitStatus('error', this.lastError);
       return false;
     }
+
+    const promptPort = options?.promptPort ?? false;
 
     try {
       await this.disconnectInternal();
 
       const nav = navigator as any;
       const grantedPorts: any[] = await nav.serial.getPorts();
-      if (grantedPorts.length > 0) {
-        const ordered = this.orderPortsByPreference(grantedPorts);
-        this.grantedPortIndex = Math.min(this.grantedPortIndex, ordered.length - 1);
-        this.port = ordered[this.grantedPortIndex];
-      } else {
+
+      if (promptPort || grantedPorts.length === 0) {
         this.port = await nav.serial.requestPort({
           filters: ARDUINO_VENDOR_IDS.map(usbVendorId => ({ usbVendorId })),
         });
         this.grantedPortIndex = 0;
+      } else {
+        const ordered = this.orderPortsByPreference(grantedPorts);
+        this.grantedPortIndex = Math.min(this.grantedPortIndex, ordered.length - 1);
+        this.port = ordered[this.grantedPortIndex];
       }
 
       return await this.openCurrentPort(baudRate);
     } catch (e: any) {
       if (e.name === 'NotFoundError') {
         this.lastError = 'No port selected';
+        this.emitStatus('error', this.lastError);
+      } else if (
+        e.message?.includes('Failed to open serial port') ||
+        e.message?.toLowerCase().includes('busy') ||
+        e.name === 'InvalidStateError'
+      ) {
+        this.lastError =
+          'Serial port in use — close Arduino IDE Serial Monitor, unplug/replug USB, then Connect again';
         this.emitStatus('error', this.lastError);
       } else {
         this.lastError = e.message || 'Web Serial connection failed';

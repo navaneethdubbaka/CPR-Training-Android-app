@@ -445,6 +445,10 @@ class ArduinoSerialManager {
     return webSerial.isAvailable();
   }
 
+  getWebSerialHint(): string | null {
+    return webSerial.getSecureContextHint();
+  }
+
   getTcpConfig(): TcpConfig {
     return tcpSerial.getConfig();
   }
@@ -1559,7 +1563,9 @@ class ArduinoSerialManager {
         }
       });
 
-      let ok = await webSerial.connect(this.config.baudRate);
+      let ok = await webSerial.connect(this.config.baudRate, {
+        promptPort: Platform.OS === 'web',
+      });
       if (ok) {
         let finalized = await this.finalizeTransportConnect('webserial');
         if (!finalized && await webSerial.tryNextGrantedPort(this.config.baudRate)) {

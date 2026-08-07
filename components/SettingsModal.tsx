@@ -1263,10 +1263,12 @@ export function SettingsModal({ visible, onClose, connectionStatus, onConnect, o
                       <View style={styles.noPortsCard}>
                         <MaterialCommunityIcons name="google-chrome" size={20} color={C.textMuted} />
                         <Text style={styles.noPortsText}>
-                          {`1. Flash the Arduino sketch at ${config.baudRate} baud\n2. Plug Arduino into this PC via USB\n3. Tap Connect — Chrome will show a COM port picker\n4. Select your Arduino port`}
-                          {!arduinoSerial.isWebSerialAvailable()
-                            ? '\n\nWeb Serial is not available in this browser. Use Chrome or Edge on desktop.'
-                            : '\n\nWeb Serial is available in this browser.'}
+                          {`1. Close Arduino IDE Serial Monitor (only one app can use the port)\n2. Flash sketch at ${config.baudRate} baud on Mega 2560\n3. Plug Arduino into this PC via USB\n4. Use Chrome or Edge on desktop (http://localhost)\n5. Tap Connect — pick your Arduino COM port\n6. Serial Monitor tab should show # PROFILE analog_v2 then CSV every ~100ms`}
+                          {arduinoSerial.getWebSerialHint()
+                            ? `\n\n${arduinoSerial.getWebSerialHint()}`
+                            : arduinoSerial.isWebSerialAvailable()
+                              ? '\n\nWeb Serial is available in this browser.'
+                              : '\n\nWeb Serial is not available in this browser.'}
                         </Text>
                       </View>
                     </View>
