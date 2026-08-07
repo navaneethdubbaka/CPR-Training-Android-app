@@ -7,8 +7,8 @@ import { webSerial } from './webserial';
 import { COMPRESSIONS_PER_CYCLE, BREATHS_PER_CYCLE } from '@/constants/cpr-protocol';
 import {
   DEFAULT_HARDWARE_PROFILE_ID,
-  MPR121_LEGACY_ASSIGNMENTS,
-  MPR121_LEGACY_CHANNELS,
+  ANALOG_V2_ASSIGNMENTS,
+  ANALOG_V2_CHANNELS,
   assignmentsStorageKey,
   getHardwareProfile,
   isHardwareProfileId,
@@ -198,8 +198,8 @@ function buildRuntimeChannels(templates: SensorChannelTemplate[]): SensorChannel
   }));
 }
 
-const ARDUINO_CHANNELS: SensorChannel[] = buildRuntimeChannels(MPR121_LEGACY_CHANNELS);
-const DEFAULT_ASSIGNMENTS: SensorAssignments = { ...MPR121_LEGACY_ASSIGNMENTS };
+const ARDUINO_CHANNELS: SensorChannel[] = buildRuntimeChannels(ANALOG_V2_CHANNELS);
+const DEFAULT_ASSIGNMENTS: SensorAssignments = { ...ANALOG_V2_ASSIGNMENTS };
 
 function getBackendUrl(): string {
   if (process.env.EXPO_PUBLIC_DOMAIN) {
@@ -229,11 +229,12 @@ class ArduinoSerialManager {
   private modeListeners: Set<(mode: ArduinoConnectionMode) => void> = new Set();
   private serialLog: SerialLogEntry[] = [];
   private maxSerialLogLines = 500;
-  private channels: SensorChannel[] = buildRuntimeChannels(MPR121_LEGACY_CHANNELS);
-  private assignments: SensorAssignments = { ...MPR121_LEGACY_ASSIGNMENTS };
+  private channels: SensorChannel[] = buildRuntimeChannels(ANALOG_V2_CHANNELS);
+  private assignments: SensorAssignments = { ...ANALOG_V2_ASSIGNMENTS };
   private profileId: HardwareProfileId = DEFAULT_HARDWARE_PROFILE_ID;
   private profileListeners: Set<(profileId: HardwareProfileId) => void> = new Set();
   private pendingProfileDetect: HardwareProfileId | null = null;
+  private autoProfileSwitchNotice: HardwareProfileId | null = null;
   private ws: WebSocket | null = null;
   private wsReconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private wsConnected = false;
@@ -260,7 +261,7 @@ class ArduinoSerialManager {
   private ultrasonicOffset = 0;
   private breathOffset = 0;
   private forceOffset = 0;
-  private forceMinPeak = 1.5;
+  private forceMinPeak = 50;
   private offsetListeners: Set<(ultrasonicOffset: number, breathOffset: number) => void> = new Set();
 
   private simulationInterval: ReturnType<typeof setInterval> | null = null;
@@ -431,6 +432,14 @@ class ArduinoSerialManager {
 
   clearPendingProfileDetect() {
     this.pendingProfileDetect = null;
+  }
+
+  getAutoProfileSwitchNotice(): HardwareProfileId | null {
+    return this.autoProfileSwitchNotice;
+  }
+
+  clearAutoProfileSwitchNotice() {
+    this.autoProfileSwitchNotice = null;
   }
 
   onProfileChange(callback: (profileId: HardwareProfileId) => void): () => void {
@@ -950,11 +959,15 @@ class ArduinoSerialManager {
     depthPeak: number;
     forcePeak: number;
   } {
-    const depthAssigned = this.assignments.compressionDepth !== null;
     const forceDedicated = this.isDedicatedForceChannel();
 
-    if (!depthAssigned && forceDedicated) {
+    if (forceDedicated) {
       return this.detectForceOnlyCycle(forceVal);
+    }
+
+    const depthAssigned = this.assignments.compressionDepth !== null;
+    if (!depthAssigned) {
+      return { detected: false, depthPeak: 0, forcePeak: 0 };
     }
 
     const thresholdStart = 6;
@@ -962,10 +975,6 @@ class ArduinoSerialManager {
     let detected = false;
     let savedDepthPeak = 0;
     let savedForcePeak = 0;
-
-    if (forceDedicated && forceVal > this.peakForce) {
-      this.peakForce = forceVal;
-    }
 
     switch (this.compressionState) {
       case 'IDLE':
@@ -999,9 +1008,6 @@ class ArduinoSerialManager {
           savedDepthPeak = this.peakDepth;
           savedForcePeak = this.peakForce;
           detected = true;
-          if (forceDedicated) {
-            detected = savedForcePeak >= this.forceMinPeak;
-          }
 
           this.compressionState = 'IDLE';
           this.peakDepth = 0;
@@ -1234,7 +1240,9 @@ class ArduinoSerialManager {
 
       case 'serial_line':
         if (msg.line !== undefined) {
-          this.addSerialLine(msg.line, 'rx');
+          if (!this.tryApplyProfileBanner(msg.line.trim())) {
+            this.addSerialLine(msg.line, 'rx');
+          }
         }
         break;
 
@@ -1465,21 +1473,28 @@ class ArduinoSerialManager {
     }
   }
 
+  private tryApplyProfileBanner(trimmed: string): boolean {
+    if (!trimmed.startsWith('# PROFILE ')) return false;
+    this.addSerialLine(trimmed, 'rx');
+    const detectedId = trimmed.slice('# PROFILE '.length).trim();
+    if (isHardwareProfileId(detectedId) && detectedId !== this.profileId) {
+      const wasLive = this.status === 'connecting' || this.status === 'connected';
+      this.setHardwareProfile(detectedId, true).catch(() => { });
+      if (wasLive) {
+        this.autoProfileSwitchNotice = detectedId;
+      }
+    }
+    this.pendingProfileDetect = null;
+    return true;
+  }
+
   //this funcation is handling Arduino Data
   private handleArduinoLine(line: string) {
-    this.addSerialLine(line, 'rx');
     const trimmed = line.trim();
-    if (trimmed.startsWith('# PROFILE ')) {
-      const detectedId = trimmed.slice('# PROFILE '.length).trim();
-      if (isHardwareProfileId(detectedId)) {
-        if (this.status === 'disconnected' && detectedId !== this.profileId) {
-          this.setHardwareProfile(detectedId, true).catch(() => { });
-        } else if (detectedId !== this.profileId) {
-          this.pendingProfileDetect = detectedId;
-        }
-      }
+    if (this.tryApplyProfileBanner(trimmed)) {
       return;
     }
+    this.addSerialLine(line, 'rx');
     const parts = line.split(',').map(s => parseFloat(s.trim()));
     if (parts.length >= 7 && !parts.some(isNaN)) {
       const rawChannels: number[] = [];
@@ -1670,7 +1685,9 @@ class ArduinoSerialManager {
 
     const cycleCountBefore = this.cycleCompressionCount;
     const wave = [0, 3, 5.5, 6.5, 6.5, 5, 2, 0];
-    const forceWave = [0, 0.8, 1.5, 2.2, 2.2, 1.2, 0.4, 0];
+    const forceWave = this.profileId === 'analog_v2'
+      ? [0, 80, 150, 220, 220, 120, 40, 0]
+      : [0, 0.8, 1.5, 2.2, 2.2, 1.2, 0.4, 0];
     let step = 0;
 
     const runStep = () => {
@@ -1740,7 +1757,9 @@ class ArduinoSerialManager {
       compressionRate: this.compressionRate || 110,
       compressionDetected: true,
       compressionPeak: 5.5,
-      compressionForcePeak: this.isDedicatedForceChannel() ? 2.2 : undefined,
+      compressionForcePeak: this.isDedicatedForceChannel()
+        ? (this.profileId === 'analog_v2' ? 220 : 2.2)
+        : undefined,
       breathDetected: false,
       breathCount: this.cycleBreathCount,
       cycleCompressionCount: emitCycleCompressionCount,

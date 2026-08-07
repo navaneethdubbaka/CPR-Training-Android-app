@@ -125,7 +125,7 @@ export const HARDWARE_PROFILES: Record<HardwareProfileId, HardwareProfile> = {
   },
 };
 
-export const DEFAULT_HARDWARE_PROFILE_ID: HardwareProfileId = 'mpr121_legacy';
+export const DEFAULT_HARDWARE_PROFILE_ID: HardwareProfileId = 'analog_v2';
 
 export const HARDWARE_PROFILE_LIST = Object.values(HARDWARE_PROFILES);
 

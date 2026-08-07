@@ -96,3 +96,8 @@ skills-lock.json
 
 # Cursor (local workspace state)
 .cursor/
+# Release / build APKs (GitHub file size limit — keep local only)
+*.apk
+CPR-Trainer-v1.0.0-release.apk
+app-release.apk
+android/app/build/outputs/apk/release/app-release.apk

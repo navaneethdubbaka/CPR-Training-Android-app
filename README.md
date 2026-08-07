@@ -109,7 +109,7 @@ When prompted, choose **Allow** for camera access on `localhost`. Without it, th
 
 ### Connect Arduino via USB (web — primary hardware path)
 
-1. Flash the Arduino sketch from `attached_assets/final_arduino_code_*.ino` at **115200 baud**.
+1. Flash the Arduino sketch from `attached_assets/analog_hardware_serial/analog_hardware_serial.ino` at **115200 baud** (Analog v2: force on A13, analog touch pads, ultrasonic depth).
 2. Plug the Arduino into the **same PC** running the browser via USB.
 3. Open **Settings → Connection**. The default mode is **USB (Web Serial)** (Chrome or Edge required).
 4. Tap **Connect** on the start screen or in Settings.
@@ -178,9 +178,9 @@ After AED shock, complete **2 full 30:2 cycles** (compressions + rescue breaths)
 
 Coaching alerts (pose + sensor) are recorded during training. **One snapshot** is captured on the first camera step; up to **4 additional random snapshots** may be taken later. On the **completion screen**, the Session Log header always shows alert/snapshot counts — expand it and use **Download Report (JSON)** to export.
 
-### Force sensors (optional hardware)
+### Force sensors (Analog v2 hardware)
 
-Assign **Compression Force** to a **dedicated** analog channel (not shared with breath pressure) in Settings. Calibrate **offset** at rest. When depth is unavailable, compressions are detected from force peaks; when both are on separate channels, both peaks must pass thresholds.
+Flash `analog_hardware_serial.ino` and select **Analog v2** in Settings (default). Compression force is on channel 7 (A13, 0–600 N). Assign **Compression Force** to ch 7, use **Set Zero** at rest, and tune **Force min peak** in Settings → Assign if soft presses do not count. Compressions are detected from force peaks when force is assigned; ultrasonic depth is shown separately when available.
 
 ### Simulation mode — compressions not counting?
 

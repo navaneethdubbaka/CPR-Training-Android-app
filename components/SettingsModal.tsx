@@ -22,6 +22,7 @@ import {
   CPR_FUNCTION_DESCRIPTIONS,
   DEFAULT_BAUD_RATE,
   HARDWARE_PROFILE_LIST,
+  getHardwareProfile,
   type HardwareProfileId,
   type AvailablePort,
 } from '@/lib/arduino-serial';
@@ -676,6 +677,8 @@ export function SettingsModal({ visible, onClose, connectionStatus, onConnect, o
   const [selectedBleId, setSelectedBleId] = useState<string | null>(null);
   const [tcpConfig, setTcpConfig] = useState(arduinoSerial.getTcpConfig());
   const [hardwareProfileId, setHardwareProfileId] = useState<HardwareProfileId>(arduinoSerial.getHardwareProfileId());
+  const [forceMinPeakInput, setForceMinPeakInput] = useState(String(arduinoSerial.getForceMinPeak()));
+  const [profileAutoNotice, setProfileAutoNotice] = useState<string | null>(null);
   const isConnected = connectionStatus === 'connected';
   const isWeb = Platform.OS === 'web';
   const connectionOptions = isWeb ? WEB_CONNECTION_OPTIONS : NATIVE_CONNECTION_OPTIONS;
@@ -717,7 +720,18 @@ export function SettingsModal({ visible, onClose, connectionStatus, onConnect, o
       setHardwareProfileId(profileId);
       setChannels(arduinoSerial.getChannels());
       setAssignments(arduinoSerial.getAssignments());
+      setForceMinPeakInput(String(arduinoSerial.getForceMinPeak()));
     });
+
+    const profileNoticeInterval = setInterval(() => {
+      const notice = arduinoSerial.getAutoProfileSwitchNotice();
+      if (notice) {
+        const label = getHardwareProfile(notice).label;
+        setProfileAutoNotice(`Auto-detected hardware profile: ${label}`);
+        arduinoSerial.clearAutoProfileSwitchNotice();
+        setForceMinPeakInput(String(arduinoSerial.getForceMinPeak()));
+      }
+    }, 400);
 
     const unsubVideos = videoAssignments.onChange((newVideos) => {
       setVideos({ ...newVideos });
@@ -743,6 +757,7 @@ export function SettingsModal({ visible, onClose, connectionStatus, onConnect, o
       unsubInvert();
       unsubOffset();
       unsubProfile();
+      clearInterval(profileNoticeInterval);
       unsubVideos();
       if (sensorPollRef.current) {
         clearInterval(sensorPollRef.current);
@@ -1099,6 +1114,12 @@ export function SettingsModal({ visible, onClose, connectionStatus, onConnect, o
                         </Pressable>
                       ))}
                     </View>
+                    {profileAutoNotice && (
+                      <View style={[styles.profileAutoNotice, { backgroundColor: `${C.feedbackGood}18`, borderColor: C.feedbackGood }]}>
+                        <MaterialCommunityIcons name="check-circle" size={16} color={C.feedbackGood} />
+                        <Text style={[styles.profileAutoNoticeText, { color: C.feedbackGood }]}>{profileAutoNotice}</Text>
+                      </View>
+                    )}
                   </View>
 
                   <View style={styles.section}>
@@ -1464,6 +1485,35 @@ export function SettingsModal({ visible, onClose, connectionStatus, onConnect, o
                       />
                     ))}
                   </View>
+
+                  {assignments.compressionForce !== null && (
+                    <View style={styles.section}>
+                      <Text style={styles.sectionTitle}>Compression Force Threshold</Text>
+                      <Text style={[styles.assignmentHeaderText, { marginBottom: 10 }]}>
+                        Minimum peak force (N) to count a compression. Lower if soft presses are not detected (default 50 for Analog v2).
+                      </Text>
+                      <View style={styles.tcpRow}>
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.inputLabel}>Force min peak (N)</Text>
+                          <TextInput
+                            style={styles.portInput}
+                            value={forceMinPeakInput}
+                            onChangeText={setForceMinPeakInput}
+                            onEndEditing={() => {
+                              const v = parseFloat(forceMinPeakInput);
+                              if (!Number.isNaN(v)) {
+                                arduinoSerial.setForceMinPeak(v);
+                                setForceMinPeakInput(String(arduinoSerial.getForceMinPeak()));
+                              }
+                            }}
+                            placeholder="50"
+                            placeholderTextColor={C.textMuted}
+                            keyboardType="numeric"
+                          />
+                        </View>
+                      </View>
+                    </View>
+                  )}
 
                   <View style={styles.section}>
                     <Text style={styles.sectionTitle}>AED Pad Placement</Text>
@@ -2536,6 +2586,20 @@ const styles = StyleSheet.create({
     padding: 14,
     borderWidth: 1,
     borderColor: Colors.surfaceLight,
+  },
+  profileAutoNotice: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 10,
+    padding: 10,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
+  profileAutoNoticeText: {
+    flex: 1,
+    fontSize: 13,
+    fontWeight: '600',
   },
   hardwareOnlyInfo: {
     flex: 1,

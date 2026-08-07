@@ -377,7 +377,7 @@ export function CPRTrainingProvider({ children }: { children: ReactNode }) {
           return;
         }
 
-        const isGoodBreath = data.airPressure >= 0.4 && data.airPressure <= 0.9;
+        const isGoodBreath = data.airPressure >= 20 && data.airPressure <= 45;
         const newBreathCount = data.breathCount;
 
         sessionAnalytics.recordFirstBreathOfCycle(stepId, Date.now(), newBreathCount);
