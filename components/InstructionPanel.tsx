@@ -7,6 +7,7 @@ import { getColors } from '@/constants/colors';
 import { useTheme } from '@/contexts/ThemeContext';
 import { CPR_STEPS, COMPRESSIONS_PER_CYCLE, BREATHS_PER_CYCLE } from '@/constants/cpr-protocol';
 import { VoicePrompt } from '@/components/VoicePrompt';
+import { arduinoSerial } from '@/lib/arduino-serial';
 
 interface InstructionPanelProps {
   stepIndex: number;
@@ -65,6 +66,8 @@ export function InstructionPanel({
   const Colors = getColors(theme);
 
   const step = CPR_STEPS[stepIndex];
+  const isCompressionStep = step.id === 'compressions' || step.id === 'post_aed_compressions';
+  const calibrationPending = isCompressionStep && arduinoSerial.isCompressionDetectionPending();
   const pulseOpacity = useSharedValue(1);
 
   useEffect(() => {
@@ -119,6 +122,13 @@ export function InstructionPanel({
           <>
             <Text style={[styles.instruction, { color: Colors.accentLight }]}>{step.instruction}</Text>
             <Text style={[styles.detail, { color: Colors.textSecondary }]}>{step.detail}</Text>
+            {isCompressionStep && (
+              <Text style={[styles.calibrationHint, { color: Colors.info }]}>
+                {calibrationPending
+                  ? 'Keep chest at rest for 2 seconds to calibrate sensors'
+                  : 'Sensors calibrated — begin compressions'}
+              </Text>
+            )}
           </>
         )}
       </View>
@@ -379,6 +389,13 @@ const styles = StyleSheet.create({
     fontSize: 13,
     textAlign: 'center',
     lineHeight: 18,
+    paddingHorizontal: 8,
+  },
+  calibrationHint: {
+    fontSize: 12,
+    textAlign: 'center',
+    fontWeight: '600',
+    marginTop: 6,
     paddingHorizontal: 8,
   },
   autoAdvanceRow: {

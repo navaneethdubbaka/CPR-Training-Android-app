@@ -118,7 +118,7 @@ export const HARDWARE_PROFILES: Record<HardwareProfileId, HardwareProfile> = {
       aedPadLower: 3,
       neckTilt: 4,
     },
-    forceScale: { max: 600, defaultMinPeak: 50 },
+    forceScale: { max: 600, defaultMinPeak: 30 },
     breathInput: 'voltage',
     breathVoltageToCmH2O: 50,
     analogTouchThreshold: 512,

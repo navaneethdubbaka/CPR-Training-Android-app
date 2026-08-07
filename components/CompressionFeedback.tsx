@@ -193,6 +193,9 @@ function CorrectionSidebar({
   Colors: ReturnType<typeof getColors>;
 }) {
   const showForce = arduinoSerial.isForceChannelAssigned();
+  const isAnalogV2Force = arduinoSerial.getHardwareProfileId() === 'analog_v2' && showForce;
+  const forceMax = isAnalogV2Force ? 150 : 5;
+  const forceUnit = isAnalogV2Force ? 'N' : 'V';
   const rateOk = currentRate >= COMPRESSION_TARGET_RATE.min && currentRate <= COMPRESSION_TARGET_RATE.max;
   const depthOk = currentDepth >= COMPRESSION_TARGET_DEPTH.min && currentDepth <= COMPRESSION_TARGET_DEPTH.max;
   const rateColor = getRateColor(currentRate, Colors);
@@ -258,12 +261,12 @@ function CorrectionSidebar({
             <GaugeBar
               value={currentForce ?? 0}
               min={0}
-              max={5}
+              max={forceMax}
               targetMin={arduinoSerial.getForceMinPeak()}
-              targetMax={5}
-              color={getDepthColor((currentForce ?? 0) >= arduinoSerial.getForceMinPeak() ? 5.5 : 3, Colors)}
+              targetMax={forceMax}
+              color={getDepthColor((currentForce ?? 0) >= arduinoSerial.getForceMinPeak() ? (isAnalogV2Force ? 5.5 : 5.5) : 3, Colors)}
               label="Force"
-              unit="V"
+              unit={forceUnit}
               Colors={Colors}
             />
           </>

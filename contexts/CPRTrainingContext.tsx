@@ -209,12 +209,14 @@ export function CPRTrainingProvider({ children }: { children: ReactNode }) {
     if (currentStepId === 'compressions') {
       resetCycleState();
       arduinoSerial.setPhase('COMPRESSION');
+      arduinoSerial.prepareCompressionStep();
     }
   }, [currentStepId, resetCycleState]);
 
   useEffect(() => {
     if (currentStepId === 'post_aed_compressions') {
       resetPostShockCycleState();
+      arduinoSerial.prepareCompressionStep();
     }
   }, [currentStepId, resetPostShockCycleState]);
 

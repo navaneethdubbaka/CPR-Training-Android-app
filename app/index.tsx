@@ -126,14 +126,41 @@ export default function TrainingScreen() {
 
     //Satya Code
   const [shoulderTapDone, setShoulderTapDone] = useState(false);
-useEffect(() => {
-  if (
-    sensorData?.touchSensors?.leftShoulder ||
-    sensorData?.touchSensors?.rightShoulder
-  ) {
-    setShoulderTapDone(true); // ✅ latch
-  }
-}, [sensorData]);
+  const shoulderStepActiveRef = useRef(false);
+  const shoulderArmedRef = useRef(false);
+  const shoulderWasLowRef = useRef(true);
+
+  useEffect(() => {
+    if (currentStep?.id === 'check_responsiveness') {
+      setShoulderTapDone(false);
+      shoulderStepActiveRef.current = true;
+      shoulderArmedRef.current = false;
+      shoulderWasLowRef.current = true;
+    } else {
+      shoulderStepActiveRef.current = false;
+    }
+  }, [currentStep?.id]);
+
+  useEffect(() => {
+    if (!shoulderStepActiveRef.current || shoulderTapDone) return;
+    const touched =
+      sensorData?.touchSensors?.leftShoulder ||
+      sensorData?.touchSensors?.rightShoulder;
+    if (!shoulderArmedRef.current) {
+      if (!touched) {
+        shoulderArmedRef.current = true;
+      }
+      return;
+    }
+    if (touched) {
+      if (shoulderWasLowRef.current) {
+        setShoulderTapDone(true);
+      }
+      shoulderWasLowRef.current = false;
+    } else {
+      shoulderWasLowRef.current = true;
+    }
+  }, [sensorData, shoulderTapDone]);
   
   // End of Satya Code
  // const shoulderTapDone = sensorData.touchSensors.leftShoulder || sensorData.touchSensors.rightShoulder;

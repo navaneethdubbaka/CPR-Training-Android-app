@@ -162,6 +162,15 @@ const DEFAULT_BAUD_RATE = 115200;
 const RX_WATCHDOG_MS = 1500;
 const NO_RX_ERROR =
   'Port open but no serial data — check baud 115200 / cable / Mega firmware';
+const FORCE_DISPLAY_MAX_N = 150;
+const COMPRESSION_DEPTH_MAX_CM = 8;
+const BASELINE_CAPTURE_MS = 1500;
+const COMPRESSION_STEP_BASELINE_MS = 2000;
+const COMPRESSION_DETECTION_GRACE_MS = 2000;
+const DEPTH_CYCLE_START_CM = 4.0;
+const DEPTH_CYCLE_END_CM = 2.5;
+const TOUCH_ON_SAMPLES = 5;
+const TOUCH_OFF_SAMPLES = 2;
 
 const DEFAULT_CONFIG: ArduinoConfig = {
   baudRate: DEFAULT_BAUD_RATE,
@@ -264,11 +273,21 @@ class ArduinoSerialManager {
   private ultrasonicOffset = 0;
   private breathOffset = 0;
   private forceOffset = 0;
-  private forceMinPeak = 50;
+  private forceMinPeak = 30;
   private offsetListeners: Set<(ultrasonicOffset: number, breathOffset: number) => void> = new Set();
   private lastConnectionError = '';
   private rxSinceConnect = false;
   private errorListeners: Set<(message: string) => void> = new Set();
+  private lastRawChannels: number[] = new Array(12).fill(0);
+  private touchOnStreak: number[] = new Array(12).fill(0);
+  private touchOffStreak: number[] = new Array(12).fill(0);
+  private debouncedTouch: boolean[] = new Array(12).fill(false);
+  private baselineCaptureActive = false;
+  private baselineCaptureDeadline = 0;
+  private depthBaselineSamples: number[] = [];
+  private forceBaselineSamples: number[] = [];
+  private compressionDetectionEnabled = true;
+  private compressionDetectionEnableAt = 0;
 
   private simulationInterval: ReturnType<typeof setInterval> | null = null;
   private simCompressionWaveTimer: ReturnType<typeof setTimeout> | null = null;
@@ -338,6 +357,7 @@ class ArduinoSerialManager {
     }
 
     console.log('[Arduino] Connected via', mode);
+    this.startBaselineCapture(BASELINE_CAPTURE_MS);
     return true;
   }
 
@@ -545,6 +565,17 @@ class ArduinoSerialManager {
     if (resetAssignments) {
       this.assignments = { ...profile.defaultAssignments };
     }
+    if (profileId === 'analog_v2') {
+      const depthIdx = this.assignments.compressionDepth;
+      if (depthIdx !== null && depthIdx >= 0 && depthIdx < 12) {
+        this.channelInverts[depthIdx] = false;
+        AsyncStorage.setItem(INVERT_STORAGE_KEY, JSON.stringify(this.channelInverts)).catch(() => { });
+      }
+    }
+    this.channels = this.channels.map(ch => ({
+      ...ch,
+      inverted: this.channelInverts[ch.index] === true,
+    }));
     const profileForceMin = profile.forceScale?.defaultMinPeak;
     if (profileForceMin !== undefined) {
       this.forceMinPeak = profileForceMin;
@@ -819,11 +850,12 @@ class ArduinoSerialManager {
       return rawChannels[idx] || 0;
     };
 
-    const rawDepth = getVal('compressionDepth');
-    const depthVal = Math.max(0, rawDepth - this.ultrasonicOffset);
-
-    const rawForce = getVal('compressionForce');
-    const forceVal = Math.max(0, rawForce - this.forceOffset);
+    const depthIdx = this.assignments.compressionDepth;
+    const forceIdx = this.assignments.compressionForce;
+    const rawDepthStandoff = depthIdx !== null ? this.lastRawChannels[depthIdx] ?? 0 : 0;
+    const rawForceReading = forceIdx !== null ? this.lastRawChannels[forceIdx] ?? 0 : 0;
+    const depthVal = this.computeCompressionDepthCm(rawDepthStandoff);
+    const forceVal = this.computeForceN(rawForceReading);
 
     const rawPressure = getVal('breathPressure');
     const pressureForDetection = Math.max(0, rawPressure - this.breathOffset);
@@ -841,23 +873,27 @@ class ArduinoSerialManager {
     let emitPhase: 'COMPRESSION' | 'BREATH' = this.phase;
 
     if (this.phase === 'COMPRESSION') {
-      const detectResult = this.detectCompressionCycle(depthVal, forceVal);
-      compressionDetected = detectResult.detected;
-      emitDepthPeak = detectResult.depthPeak;
-      emitForcePeak = detectResult.forcePeak;
+      this.updateCompressionDetectionGate();
+      const detectionAllowed = this.compressionDetectionEnabled && !this.baselineCaptureActive;
+      if (detectionAllowed) {
+        const detectResult = this.detectCompressionCycle(depthVal, forceVal);
+        compressionDetected = detectResult.detected;
+        emitDepthPeak = detectResult.depthPeak;
+        emitForcePeak = detectResult.forcePeak;
 
-      if (compressionDetected) {
-        this.cycleCompressionCount++;
-        emitCycleCompressionCount = this.cycleCompressionCount;
-        emitPhase = 'COMPRESSION';
+        if (compressionDetected) {
+          this.cycleCompressionCount++;
+          emitCycleCompressionCount = this.cycleCompressionCount;
+          emitPhase = 'COMPRESSION';
 
-        if (this.cycleCompressionCount >= COMPRESSIONS_PER_CYCLE) {
-          emitCycleCompressionCount = COMPRESSIONS_PER_CYCLE;
-          emitPhase = 'BREATH';
-          this.phase = 'BREATH';
-          this.cycleCompressionCount = 0;
-          this.breathState = 'IDLE';
-          this.peakPressure = 0;
+          if (this.cycleCompressionCount >= COMPRESSIONS_PER_CYCLE) {
+            emitCycleCompressionCount = COMPRESSIONS_PER_CYCLE;
+            emitPhase = 'BREATH';
+            this.phase = 'BREATH';
+            this.cycleCompressionCount = 0;
+            this.breathState = 'IDLE';
+            this.peakPressure = 0;
+          }
         }
       }
     } else if (this.phase === 'BREATH') {
@@ -923,17 +959,50 @@ class ArduinoSerialManager {
   }
 
   private updateChannelsFromRaw(rawChannels: number[]) {
+    for (let i = 0; i < 12; i++) {
+      this.lastRawChannels[i] = i < rawChannels.length ? rawChannels[i] : 0;
+    }
+
     this.channels = this.channels.map((ch, i) => {
       const rawVal = i < rawChannels.length ? rawChannels[i] : 0;
       const normalized = this.normalizeChannelValue(ch, rawVal);
-      const val = this.applyInversion(ch, normalized);
       const isBinary = ch.type === 'i2c_touch' || ch.type === 'digital' || ch.type === 'analog_touch';
+      const skipInvert = ch.type === 'ultrasonic' && this.profileId === 'analog_v2';
+
+      let val: number;
+      if (isBinary) {
+        const rawActive = normalized > 0;
+        if (rawActive) {
+          this.touchOnStreak[i]++;
+          this.touchOffStreak[i] = 0;
+        } else {
+          this.touchOffStreak[i]++;
+          this.touchOnStreak[i] = 0;
+        }
+        if (!this.debouncedTouch[i] && this.touchOnStreak[i] >= TOUCH_ON_SAMPLES) {
+          this.debouncedTouch[i] = true;
+        }
+        if (this.debouncedTouch[i] && this.touchOffStreak[i] >= TOUCH_OFF_SAMPLES) {
+          this.debouncedTouch[i] = false;
+        }
+        val = this.debouncedTouch[i] ? 1 : 0;
+        if (ch.inverted) {
+          val = val > 0 ? 0 : 1;
+        }
+      } else {
+        val = skipInvert ? normalized : this.applyInversion(ch, normalized);
+      }
+
       return {
         ...ch,
         currentValue: val,
         active: isBinary ? val > 0 : val > 0,
       };
     });
+
+    if (this.baselineCaptureActive) {
+      this.collectBaselineSamples();
+    }
   }
 
   setChannelInverted(channelIndex: number, inverted: boolean) {
@@ -1001,6 +1070,104 @@ class ArduinoSerialManager {
     this.peakPressure = 0;
   }
 
+  resetCycleDetection() {
+    this.compressionState = 'IDLE';
+    this.forceCompressionState = 'IDLE';
+    this.lastDepth = 0;
+    this.lastForce = 0;
+    this.peakDepth = 0;
+    this.peakForce = 0;
+    this.cycleCompressionCount = 0;
+  }
+
+  prepareCompressionStep() {
+    this.resetCycleDetection();
+    this.compressionDetectionEnabled = false;
+    this.startBaselineCapture(COMPRESSION_STEP_BASELINE_MS, COMPRESSION_DETECTION_GRACE_MS);
+  }
+
+  isBaselineCapturing(): boolean {
+    return this.baselineCaptureActive;
+  }
+
+  isCompressionDetectionPending(): boolean {
+    return !this.compressionDetectionEnabled || this.baselineCaptureActive;
+  }
+
+  private usesBaselineDepth(): boolean {
+    return this.profileId === 'analog_v2' && this.assignments.compressionDepth !== null;
+  }
+
+  private computeCompressionDepthCm(rawStandoff: number): number {
+    if (this.usesBaselineDepth()) {
+      return Math.max(0, Math.min(COMPRESSION_DEPTH_MAX_CM, this.ultrasonicOffset - rawStandoff));
+    }
+    return Math.max(0, rawStandoff - this.ultrasonicOffset);
+  }
+
+  private computeForceN(rawForce: number): number {
+    return Math.min(FORCE_DISPLAY_MAX_N, Math.max(0, rawForce - this.forceOffset));
+  }
+
+  private median(samples: number[]): number {
+    if (samples.length === 0) return 0;
+    const sorted = [...samples].sort((a, b) => a - b);
+    const mid = Math.floor(sorted.length / 2);
+    return sorted.length % 2 === 0
+      ? (sorted[mid - 1] + sorted[mid]) / 2
+      : sorted[mid];
+  }
+
+  private pendingDetectionGraceMs = 0;
+
+  startBaselineCapture(durationMs: number, graceAfterMs = 0) {
+    this.baselineCaptureActive = true;
+    this.baselineCaptureDeadline = Date.now() + durationMs;
+    this.depthBaselineSamples = [];
+    this.forceBaselineSamples = [];
+    this.pendingDetectionGraceMs = graceAfterMs;
+    this.compressionDetectionEnabled = false;
+  }
+
+  private collectBaselineSamples() {
+    const depthIdx = this.assignments.compressionDepth;
+    const forceIdx = this.assignments.compressionForce;
+    if (depthIdx !== null && depthIdx < this.lastRawChannels.length) {
+      this.depthBaselineSamples.push(this.lastRawChannels[depthIdx]);
+    }
+    if (forceIdx !== null && forceIdx < this.lastRawChannels.length) {
+      this.forceBaselineSamples.push(this.lastRawChannels[forceIdx]);
+    }
+    if (Date.now() >= this.baselineCaptureDeadline) {
+      this.finishBaselineCapture();
+    }
+  }
+
+  private finishBaselineCapture() {
+    this.baselineCaptureActive = false;
+    if (this.depthBaselineSamples.length > 0) {
+      this.setUltrasonicOffset(this.median(this.depthBaselineSamples));
+    }
+    if (this.forceBaselineSamples.length > 0) {
+      this.setForceOffset(this.median(this.forceBaselineSamples));
+    }
+    const grace = this.pendingDetectionGraceMs;
+    this.pendingDetectionGraceMs = 0;
+    if (grace > 0) {
+      this.resetCycleDetection();
+      this.compressionDetectionEnabled = false;
+      this.compressionDetectionEnableAt = Date.now() + grace;
+    } else {
+      this.compressionDetectionEnabled = true;
+    }
+  }
+
+  private updateCompressionDetectionGate() {
+    if (!this.compressionDetectionEnabled && Date.now() >= this.compressionDetectionEnableAt) {
+      this.compressionDetectionEnabled = true;
+    }
+  }
+
   isDedicatedForceChannel(): boolean {
     const forceIdx = this.assignments.compressionForce;
     if (forceIdx === null) return false;
@@ -1035,7 +1202,7 @@ class ArduinoSerialManager {
   calibrateForce() {
     const idx = this.assignments.compressionForce;
     if (idx === null) return;
-    const raw = this.channels[idx]?.currentValue ?? 0;
+    const raw = this.lastRawChannels[idx] ?? this.channels[idx]?.currentValue ?? 0;
     this.setForceOffset(raw);
   }
 
@@ -1076,8 +1243,8 @@ class ArduinoSerialManager {
     depthPeak: number;
     forcePeak: number;
   } {
-    const thresholdStart = 6;
-    const thresholdEnd = 5.2;
+    const thresholdStart = this.usesBaselineDepth() ? DEPTH_CYCLE_START_CM : 6;
+    const thresholdEnd = this.usesBaselineDepth() ? DEPTH_CYCLE_END_CM : 5.2;
     let detected = false;
     let savedDepthPeak = 0;
     let savedForcePeak = 0;
@@ -1237,7 +1404,7 @@ class ArduinoSerialManager {
   calibrateUltrasonic() {
     const idx = this.assignments['compressionDepth'];
     if (idx === null) return;
-    const raw = this.channels[idx]?.currentValue ?? 0;
+    const raw = this.lastRawChannels[idx] ?? this.channels[idx]?.currentValue ?? 0;
     this.setUltrasonicOffset(raw);
   }
 

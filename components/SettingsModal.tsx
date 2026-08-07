@@ -209,7 +209,13 @@ function ChannelCard({ channel, isConnected, channelIndex, offset, onOffsetChang
   };
 
   const rawVal = typeof channel.currentValue === 'number' ? channel.currentValue : 0;
-  const adjustedVal = offset !== undefined ? Math.max(0, rawVal - offset) : rawVal;
+  const profileId = arduinoSerial.getHardwareProfileId();
+  const isAnalogV2Depth = channel.type === 'ultrasonic' && profileId === 'analog_v2' && offset !== undefined;
+  const adjustedVal = isAnalogV2Depth
+    ? Math.max(0, Math.min(8, (offset ?? 0) - rawVal))
+    : channel.type === 'force' && offset !== undefined
+      ? Math.min(150, Math.max(0, rawVal - offset))
+      : offset !== undefined ? Math.max(0, rawVal - offset) : rawVal;
 
   return (
     <View style={[styles.sensorCard, { backgroundColor: C.surfaceLight }, isActive && { borderColor: `${C.feedbackGood}40` }]}>
@@ -252,6 +258,7 @@ function ChannelCard({ channel, isConnected, channelIndex, offset, onOffsetChang
           <View style={styles.offsetHeader}>
             <MaterialCommunityIcons name="tune-vertical" size={13} color={C.info} />
             <Text style={[styles.offsetTitle, { color: C.info }]}>Offset / Zero Calibration</Text>
+            <Text style={[styles.offsetHint, { color: C.textMuted }]}>Calibrate at rest with sensors installed.</Text>
           </View>
           <View style={styles.offsetControls}>
             <Pressable style={[styles.offsetStepBtn, { backgroundColor: C.surface }]} onPress={() => adjustOffset(-0.5)}>
@@ -2740,6 +2747,10 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     textTransform: 'uppercase',
     letterSpacing: 0.5,
+  },
+  offsetHint: {
+    fontSize: 10,
+    marginTop: 2,
   },
   offsetControls: {
     flexDirection: 'row',
