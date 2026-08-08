@@ -31,6 +31,7 @@ const int FORCE_MAX = 600;
 
 const unsigned long LINE_INTERVAL_MS = 100;
 unsigned long lastLineMs = 0;
+long lastValidDepthCm = 0;
 
 void setup() {
   Serial.begin(115200);
@@ -84,6 +85,38 @@ int mapForce(int raw) {
 }
 
 long readUltrasonicCm() {
+  long samples[3];
+  int validCount = 0;
+  for (int i = 0; i < 3; i++) {
+    long reading = readUltrasonicCmOnce();
+    if (reading > 0) {
+      samples[validCount++] = reading;
+    }
+    if (i < 2) {
+      delay(5);
+    }
+  }
+
+  if (validCount == 0) {
+    return lastValidDepthCm;
+  }
+
+  for (int i = 0; i < validCount - 1; i++) {
+    for (int j = i + 1; j < validCount; j++) {
+      if (samples[j] < samples[i]) {
+        long tmp = samples[i];
+        samples[i] = samples[j];
+        samples[j] = tmp;
+      }
+    }
+  }
+
+  long median = samples[validCount / 2];
+  lastValidDepthCm = median;
+  return median;
+}
+
+long readUltrasonicCmOnce() {
   pinMode(PING_TRIGGER, OUTPUT);
   digitalWrite(PING_TRIGGER, LOW);
   delayMicroseconds(2);
@@ -94,7 +127,7 @@ long readUltrasonicCm() {
   pinMode(PING_ECHO, INPUT);
   long duration = pulseIn(PING_ECHO, HIGH, 30000);
   if (duration <= 0) {
-    return 0;
+    return lastValidDepthCm > 0 ? lastValidDepthCm : 0;
   }
   return microsecondsToCentimeters(duration);
 }

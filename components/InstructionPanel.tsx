@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, Pressable } from 'react-native';
 import Animated, { useSharedValue, useAnimatedStyle, withTiming, withRepeat, withSequence } from 'react-native-reanimated';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -67,8 +67,22 @@ export function InstructionPanel({
 
   const step = CPR_STEPS[stepIndex];
   const isCompressionStep = step.id === 'compressions' || step.id === 'post_aed_compressions';
+  const [setupRemainingMs, setSetupRemainingMs] = useState(0);
   const calibrationPending = isCompressionStep && arduinoSerial.isCompressionDetectionPending();
   const pulseOpacity = useSharedValue(1);
+
+  useEffect(() => {
+    if (!isCompressionStep) {
+      setSetupRemainingMs(0);
+      return;
+    }
+    const updateCountdown = () => {
+      setSetupRemainingMs(arduinoSerial.getCompressionSetupRemainingMs());
+    };
+    updateCountdown();
+    const timer = setInterval(updateCountdown, 100);
+    return () => clearInterval(timer);
+  }, [isCompressionStep, stepIndex]);
 
   useEffect(() => {
     pulseOpacity.value = withRepeat(
@@ -125,7 +139,9 @@ export function InstructionPanel({
             {isCompressionStep && (
               <Text style={[styles.calibrationHint, { color: Colors.info }]}>
                 {calibrationPending
-                  ? 'Keep chest at rest for 2 seconds to calibrate sensors'
+                  ? setupRemainingMs > 0
+                    ? `Keep chest at rest — ready in ${Math.ceil(setupRemainingMs / 1000)}s`
+                    : 'Keep chest at rest to calibrate sensors'
                   : 'Sensors calibrated — begin compressions'}
               </Text>
             )}

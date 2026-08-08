@@ -174,6 +174,13 @@ function ChannelCard({ channel, isConnected, channelIndex, offset, onOffsetChang
       return channel.currentValue ? 'ON' : 'OFF';
     }
     if (typeof channel.currentValue === 'number') {
+      const profileId = arduinoSerial.getHardwareProfileId();
+      const isAnalogV2Depth = channel.type === 'ultrasonic' && profileId === 'analog_v2' && offset !== undefined;
+      if (isAnalogV2Depth) {
+        const raw = channel.currentValue;
+        const effective = Math.max(0, Math.min(8, (offset ?? 0) - raw));
+        return effective.toFixed(1);
+      }
       return channel.currentValue > 0 ? channel.currentValue.toFixed(1) : '0';
     }
     return '--';
@@ -241,6 +248,11 @@ function ChannelCard({ channel, isConnected, channelIndex, offset, onOffsetChang
         </View>
       </View>
       <Text style={[styles.sensorDescription, { color: C.textSecondary }]}>{channel.description}</Text>
+      {isAnalogV2Depth && (
+        <Text style={[styles.offsetHint, { color: C.textMuted, marginBottom: 8 }]}>
+          Effective 0 at rest is correct — compressions increase effective depth.
+        </Text>
+      )}
       <View style={styles.invertRow}>
         <View style={styles.invertInfo}>
           <MaterialCommunityIcons name="swap-horizontal" size={14} color={inverted ? C.warning : C.textMuted} />
@@ -1506,7 +1518,7 @@ export function SettingsModal({ visible, onClose, connectionStatus, onConnect, o
                     <View style={styles.section}>
                       <Text style={styles.sectionTitle}>Compression Force Threshold</Text>
                       <Text style={[styles.assignmentHeaderText, { marginBottom: 10 }]}>
-                        Minimum peak force (N) to count a compression. Lower if soft presses are not detected (default 50 for Analog v2).
+                        Minimum peak force (N) to count a compression. Lower if soft presses are not detected (default 30 for Analog v2).
                       </Text>
                       <View style={styles.tcpRow}>
                         <View style={{ flex: 1 }}>
@@ -1522,7 +1534,7 @@ export function SettingsModal({ visible, onClose, connectionStatus, onConnect, o
                                 setForceMinPeakInput(String(arduinoSerial.getForceMinPeak()));
                               }
                             }}
-                            placeholder="50"
+                            placeholder="30"
                             placeholderTextColor={C.textMuted}
                             keyboardType="numeric"
                           />
@@ -1594,7 +1606,7 @@ export function SettingsModal({ visible, onClose, connectionStatus, onConnect, o
                           channelIndex={chIdx}
                           offset={isDepthChannel ? ultrasonicOffset : isBreathChannel ? breathOffset : isForceChannel ? arduinoSerial.getForceOffset() : undefined}
                           onOffsetChange={isDepthChannel
-                            ? (v) => arduinoSerial.setUltrasonicOffset(v)
+                            ? (v) => arduinoSerial.setUltrasonicOffset(v, true)
                             : isBreathChannel
                               ? (v) => arduinoSerial.setBreathOffset(v)
                               : isForceChannel
