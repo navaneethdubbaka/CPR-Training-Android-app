@@ -5,7 +5,7 @@ import {
   CPR_STEPS, type CPRStepId, BREATHS_PER_CYCLE, CYCLES_TRAINING, CYCLES_TESTING,
   COMPRESSION_SETS_REQUIRED, POST_SHOCK_CYCLES_TRAINING, POST_SHOCK_CYCLES_TESTING,
 } from '@/constants/cpr-protocol';
-import { arduinoSerial, type SensorData, type ArduinoConnectionStatus, type ArduinoConnectionMode, DEFAULT_SENSOR_DATA } from '@/lib/arduino-serial';
+import { arduinoSerial, HIGH_FORCE_THRESHOLD_N, type SensorData, type ArduinoConnectionStatus, type ArduinoConnectionMode, DEFAULT_SENSOR_DATA } from '@/lib/arduino-serial';
 import { sessionRecorder, type CoachingEvent, type SessionSnapshot } from '@/lib/session-recorder';
 import { sessionAnalytics, DEFAULT_SESSION_ANALYTICS, type SessionAnalyticsSummary } from '@/lib/session-analytics';
 import * as Haptics from 'expo-haptics';
@@ -296,19 +296,25 @@ export function CPRTrainingProvider({ children }: { children: ReactNode }) {
         const depth = data.compressionPeak ?? data.compressionDepth;
         const force = data.compressionForcePeak ?? data.compressionForce ?? 0;
         const forceMin = arduinoSerial.getForceMinPeak();
+        const depthChannelAssigned = arduinoSerial.isCompressionDepthAssigned();
 
         const isGoodDepth = depth >= 5 && depth <= 6;
         const isGoodForce = force >= forceMin;
         const isGoodRate = data.compressionRate >= 100 && data.compressionRate <= 120;
 
-        const hasDepthSignal = depth > 0;
-        const hasForceSignal = force > 0;
-        const qualityPass = hasDepthSignal
+        const qualityPass = depthChannelAssigned
           ? isGoodDepth
-          : hasForceSignal
+          : force > 0
             ? isGoodForce
             : isGoodDepth;
         const isGood = qualityPass && isGoodRate;
+
+        if (
+          data.compressionForcePeakRaw !== undefined
+          && data.compressionForcePeakRaw > HIGH_FORCE_THRESHOLD_N
+        ) {
+          sessionAnalytics.recordHighForceCompression();
+        }
 
         if (isColsMode) {
           setMetrics(prev => ({

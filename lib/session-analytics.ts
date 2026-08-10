@@ -15,6 +15,7 @@ export interface SessionAnalyticsSummary {
   compressToBreathTargetMs: number;
   avgRate: number;
   avgDepth: number;
+  highForceCompressionCount: number;
 }
 
 export const DEFAULT_SESSION_ANALYTICS: SessionAnalyticsSummary = {
@@ -26,6 +27,7 @@ export const DEFAULT_SESSION_ANALYTICS: SessionAnalyticsSummary = {
   compressToBreathTargetMs: COMPRESS_TO_BREATH_TARGET_MS,
   avgRate: 0,
   avgDepth: 0,
+  highForceCompressionCount: 0,
 };
 
 const CPR_POSE_STEPS = new Set<CPRStepId>([
@@ -42,6 +44,7 @@ class SessionAnalytics {
   private compressionInterruptions = 0;
   private maxCompressToBreathGapMs = 0;
   private compressToBreathGapCount = 0;
+  private highForceCompressionCount = 0;
 
   private prevElbowOk: boolean | null = null;
   private prevLookOk: boolean | null = null;
@@ -55,6 +58,7 @@ class SessionAnalytics {
     this.compressionInterruptions = 0;
     this.maxCompressToBreathGapMs = 0;
     this.compressToBreathGapCount = 0;
+    this.highForceCompressionCount = 0;
     this.prevElbowOk = null;
     this.prevLookOk = null;
     this.lastCompressionAt = 0;
@@ -124,6 +128,11 @@ class SessionAnalytics {
     this.lastCycleCompressionAt = null;
   }
 
+  /** Compression exceeded high-force threshold (raw N from force sensor). */
+  recordHighForceCompression(): void {
+    this.highForceCompressionCount += 1;
+  }
+
   finalize(avgRate: number, avgDepth: number): SessionAnalyticsSummary {
     return {
       elbowFoldCount: this.elbowFoldCount,
@@ -134,6 +143,7 @@ class SessionAnalytics {
       compressToBreathTargetMs: COMPRESS_TO_BREATH_TARGET_MS,
       avgRate,
       avgDepth,
+      highForceCompressionCount: this.highForceCompressionCount,
     };
   }
 

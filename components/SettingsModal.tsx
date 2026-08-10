@@ -1518,7 +1518,7 @@ export function SettingsModal({ visible, onClose, connectionStatus, onConnect, o
                     <View style={styles.section}>
                       <Text style={styles.sectionTitle}>Compression Force Threshold</Text>
                       <Text style={[styles.assignmentHeaderText, { marginBottom: 10 }]}>
-                        Minimum peak force (N) to count a compression. Lower if soft presses are not detected (default 30 for Analog v2).
+                        Compressions are counted from ultrasonic depth only. Force is shown for live feedback; compressions above 150 N appear on the session report. Minimum peak (N) below is legacy — not used for counting on Analog v2.
                       </Text>
                       <View style={styles.tcpRow}>
                         <View style={{ flex: 1 }}>

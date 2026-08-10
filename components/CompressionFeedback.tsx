@@ -140,6 +140,7 @@ function GaugeBar({
   label,
   unit,
   Colors,
+  showZero = false,
 }: {
   value: number;
   min: number;
@@ -150,6 +151,7 @@ function GaugeBar({
   label: string;
   unit: string;
   Colors: ReturnType<typeof getColors>;
+  showZero?: boolean;
 }) {
   const range = max - min;
   const targetLeft = `${((targetMin - min) / range) * 100}%` as any;
@@ -161,7 +163,9 @@ function GaugeBar({
       <Text style={[gaugeStyles.label, { color: Colors.textMuted }]}>{label}</Text>
       <View style={gaugeStyles.row}>
         <Text style={[gaugeStyles.value, { color }]}>
-          {value > 0 ? (Number.isInteger(value) ? value : value.toFixed(1)) : '--'}
+          {showZero || value > 0
+            ? (Number.isInteger(value) ? value : value.toFixed(1))
+            : '--'}
         </Text>
         <Text style={[gaugeStyles.unit, { color: Colors.textMuted }]}>{unit}</Text>
       </View>
@@ -169,6 +173,9 @@ function GaugeBar({
         <View style={[gaugeStyles.targetZone, { left: targetLeft, width: targetWidth }]} />
         {value > 0 && (
           <View style={[gaugeStyles.indicator, { left: indicatorLeft, backgroundColor: color }]} />
+        )}
+        {showZero && value === 0 && (
+          <View style={[gaugeStyles.indicator, { left: '0%', backgroundColor: Colors.textMuted }]} />
         )}
       </View>
     </View>
@@ -193,6 +200,8 @@ function CorrectionSidebar({
   Colors: ReturnType<typeof getColors>;
 }) {
   const showForce = arduinoSerial.isForceChannelAssigned();
+  const depthSensorLive = arduinoSerial.isCompressionDepthAssigned()
+    && arduinoSerial.getStatus() === 'connected';
   const isAnalogV2Force = arduinoSerial.getHardwareProfileId() === 'analog_v2' && showForce;
   const forceMax = isAnalogV2Force ? 150 : 5;
   const forceUnit = isAnalogV2Force ? 'N' : 'V';
@@ -254,6 +263,7 @@ function CorrectionSidebar({
           label="Depth"
           unit="cm"
           Colors={Colors}
+          showZero={depthSensorLive}
         />
         {showForce && (
           <>

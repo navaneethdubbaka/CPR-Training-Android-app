@@ -180,7 +180,7 @@ Coaching alerts (pose + sensor) are recorded during training. **One snapshot** i
 
 ### Force sensors (Analog v2 hardware)
 
-Flash `analog_hardware_serial.ino` and select **Analog v2** in Settings (default). Compression force is on channel 7 (A13, 0–600 N). Assign **Compression Force** to ch 7, use **Set Zero** at rest, and tune **Force min peak** in Settings → Assign if soft presses do not count. Compressions are detected from force peaks when force is assigned; ultrasonic depth is shown separately when available.
+Flash `analog_hardware_serial.ino` and select **Analog v2** in Settings (default). Compressions are **counted from ultrasonic depth** (channel 5): calibrate with **Set Zero** at rest so effective depth reads 0 cm, then compressions in the **2–6 cm** range are detected. **Compression force** (channel 7, A13) is shown for live feedback only; compressions above **150 N** are tallied on the completion report.
 
 ### Simulation mode — compressions not counting?
 

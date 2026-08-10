@@ -260,6 +260,15 @@ export function CompletionScreen({
           surfaceColor={Colors.surface}
           mutedColor={Colors.textMuted}
         />
+        <AnimatedStat
+          label="High-force compressions"
+          value={String(sessionAnalytics.highForceCompressionCount)}
+          sublabel=">150 N"
+          delay={1200}
+          color={sessionAnalytics.highForceCompressionCount === 0 ? Colors.feedbackGood : Colors.feedbackOk}
+          surfaceColor={Colors.surface}
+          mutedColor={Colors.textMuted}
+        />
       </View>
 
       <View style={[styles.logSection, { backgroundColor: Colors.surface, borderColor: Colors.border }]}>
