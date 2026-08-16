@@ -24,6 +24,7 @@ const FORCE_OFFSET_KEY = 'cpr_force_offset';
 const FORCE_MANUAL_CALIB_KEY = 'cpr_force_manual_calib';
 const FORCE_MIN_PEAK_KEY = 'cpr_force_min_peak';
 const PREFERRED_CONNECTION_KEY = 'cpr_preferred_connection';
+const BACKEND_HOST_KEY = 'cpr_backend_host';
 const HARDWARE_PROFILE_KEY = 'cpr_hardware_profile';
 
 
@@ -163,6 +164,8 @@ type HardwareOnlyCallback = (hardwareOnly: boolean) => void;
 
 const DEFAULT_BAUD_RATE = 115200;
 const RX_WATCHDOG_MS = 1500;
+/** ESP8266/Mega often need longer after USB open/boot before first RX. */
+const USB_RX_WATCHDOG_MS = 5000;
 const NO_RX_ERROR =
   'Port open but no serial data — check baud 115200 / cable / Mega firmware';
 const FORCE_DISPLAY_MAX_N = 150;
@@ -223,6 +226,17 @@ function buildRuntimeChannels(templates: SensorChannelTemplate[]): SensorChannel
 const ARDUINO_CHANNELS: SensorChannel[] = buildRuntimeChannels(ANALOG_V2_CHANNELS);
 const DEFAULT_ASSIGNMENTS: SensorAssignments = { ...ANALOG_V2_ASSIGNMENTS };
 
+function normalizeBackendHost(raw: string): string {
+  const trimmed = raw.trim();
+  if (!trimmed) return '';
+  if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+    return trimmed.replace(/\/$/, '');
+  }
+  return `http://${trimmed.replace(/\/$/, '')}`;
+}
+
+let storedBackendHost = '';
+
 function getBackendUrl(): string {
   if (process.env.EXPO_PUBLIC_DOMAIN) {
     return `https://${process.env.EXPO_PUBLIC_DOMAIN}`;
@@ -230,11 +244,15 @@ function getBackendUrl(): string {
   if (Platform.OS === 'web') {
     return window.location.origin.replace(':8081', ':5000');
   }
-  return 'http://localhost:5000';
+  if (storedBackendHost) {
+    return normalizeBackendHost(storedBackendHost);
+  }
+  return '';
 }
 
 function getWsUrl(): string {
   const base = getBackendUrl();
+  if (!base) return '';
   const wsBase = base.replace(/^http/, 'ws');
   return `${wsBase}/ws/arduino`;
 }
@@ -263,6 +281,7 @@ class ArduinoSerialManager {
   private mode: ArduinoConnectionMode = 'simulation';
   private _hardwareOnly = true;
   private preferredConnection: PreferredConnection = Platform.OS === 'web' ? 'webserial' : 'auto';
+  private backendHost = '';
   private availablePorts: AvailablePort[] = [];
   private usbDevices: UsbDevice[] = [];
   private bleDevices: BleDevice[] = [];
@@ -367,7 +386,8 @@ class ArduinoSerialManager {
     this.setStatus('connected');
     this.clearConnectionError();
 
-    const gotRx = await this.waitForInitialRx(RX_WATCHDOG_MS);
+    const watchdogMs = mode === 'usb' ? USB_RX_WATCHDOG_MS : RX_WATCHDOG_MS;
+    const gotRx = await this.waitForInitialRx(watchdogMs);
     if (!gotRx) {
       this.setConnectionError(NO_RX_ERROR);
       this.setStatus('error');
@@ -420,6 +440,21 @@ class ArduinoSerialManager {
     return this.preferredConnection;
   }
 
+  getBackendHost(): string {
+    return this.backendHost;
+  }
+
+  setBackendHost(host: string) {
+    const normalized = host.trim();
+    this.backendHost = normalized;
+    storedBackendHost = normalized;
+    AsyncStorage.setItem(BACKEND_HOST_KEY, normalized).catch(() => { });
+  }
+
+  getBackendUrl(): string {
+    return getBackendUrl();
+  }
+
   setPreferredConnection(pref: PreferredConnection) {
     this.preferredConnection = pref;
     AsyncStorage.setItem(PREFERRED_CONNECTION_KEY, pref).catch(() => { });
@@ -429,11 +464,25 @@ class ArduinoSerialManager {
     try {
       const raw = await AsyncStorage.getItem(PREFERRED_CONNECTION_KEY);
       if (raw && VALID_PREFERRED_CONNECTIONS.includes(raw as PreferredConnection)) {
-        this.preferredConnection = raw as PreferredConnection;
+        let pref = raw as PreferredConnection;
+        if (Platform.OS !== 'web' && pref === 'webserial') {
+          pref = 'auto';
+          await AsyncStorage.setItem(PREFERRED_CONNECTION_KEY, pref);
+        }
+        this.preferredConnection = pref;
       } else if (Platform.OS === 'web') {
         this.preferredConnection = 'webserial';
       }
     } catch { }
+
+    try {
+      const host = await AsyncStorage.getItem(BACKEND_HOST_KEY);
+      if (host) {
+        this.backendHost = host;
+        storedBackendHost = host;
+      }
+    } catch { }
+
     await this.loadHardwareProfile();
   }
 
@@ -1589,6 +1638,15 @@ class ArduinoSerialManager {
     return new Promise((resolve) => {
       try {
         const wsUrl = getWsUrl();
+        if (!wsUrl) {
+          this.setConnectionError(
+            Platform.OS === 'web'
+              ? 'Backend server URL not configured'
+              : 'Set backend host in Settings → Connection (e.g. 192.168.1.10:5000)',
+          );
+          resolve(false);
+          return;
+        }
         this.ws = new WebSocket(wsUrl);
 
         const timeout = setTimeout(() => {
@@ -1760,6 +1818,11 @@ class ArduinoSerialManager {
 
       this.usbStatusUnsub = nativeUsbSerial.onStatusChange((status, message) => {
         if (status === 'disconnected' || status === 'error') {
+          // Ignore connect-time teardown noise; listeners are registered before open.
+          if (status === 'disconnected' && this.status === 'connecting') {
+            console.log('[Arduino USB] Ignoring disconnected while connecting');
+            return;
+          }
           console.log('[Arduino USB] Status:', status, message);
           if (message) {
             this.setConnectionError(message);
@@ -1974,19 +2037,16 @@ class ArduinoSerialManager {
       return this.fallbackSimulationOrError();
     }
 
-    if (pref === 'webserial') {
-      const ok = await this.connectWebSerialMode();
-      if (ok) return true;
-    }
-
     if (pref === 'tcp') {
       const ok = await this.connectTcpMode();
       if (ok) return true;
+      return this.fallbackSimulationOrError();
     }
 
     if (pref === 'ble') {
       const ok = await this.connectBle();
       if (ok) return true;
+      return this.fallbackSimulationOrError();
     }
 
     if (pref === 'websocket') {
@@ -1996,19 +2056,7 @@ class ArduinoSerialManager {
     if ((pref === 'auto' || pref === 'usb') && Platform.OS === 'android' && nativeUsbSerial.isAvailable()) {
       const usbOk = await this.connectUsb();
       if (usbOk) return true;
-      console.log('[Arduino] USB OTG failed, trying next transport...');
-    }
-
-    if (pref === 'auto') {
-      if (bleSerial.isAvailable()) {
-        const bleOk = await this.connectBle();
-        if (bleOk) return true;
-        console.log('[Arduino] BLE failed, trying TCP...');
-      }
-      const tcpOk = await this.connectTcpMode();
-      if (tcpOk) return true;
-      console.log('[Arduino] TCP failed, trying WebSocket...');
-      return this.connectWsFallback();
+      console.log('[Arduino] USB OTG failed');
     }
 
     return this.fallbackSimulationOrError();

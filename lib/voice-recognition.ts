@@ -79,6 +79,8 @@ class VoiceRecognitionManager {
   private isListening = false;
   private sessionId = 0;
   private nativeListeners: ListenerSubscription[] = [];
+  private startChain: Promise<void> = Promise.resolve();
+  private lastNativeStopAt = 0;
 
   private bumpSession(): number {
     this.sessionId += 1;
@@ -99,9 +101,27 @@ class VoiceRecognitionManager {
   }
 
   async startListening(callbacks: VoiceRecognitionCallbacks): Promise<void> {
+    // Serialize starts so Android SpeechRecognizer is never stop/start thrashed.
+    this.startChain = this.startChain
+      .catch(() => {})
+      .then(() => this.startListeningInternal(callbacks));
+    return this.startChain;
+  }
+
+  private async startListeningInternal(callbacks: VoiceRecognitionCallbacks): Promise<void> {
     if (this.isListening) {
       await this.stopListening();
     }
+
+    // Debounce after native stop so the OS recognizer can settle.
+    if (Platform.OS !== 'web' && this.lastNativeStopAt > 0) {
+      const elapsed = Date.now() - this.lastNativeStopAt;
+      const settleMs = 400;
+      if (elapsed < settleMs) {
+        await new Promise((r) => setTimeout(r, settleMs - elapsed));
+      }
+    }
+
     this.isListening = true;
     const session = this.bumpSession();
 
@@ -115,11 +135,12 @@ class VoiceRecognitionManager {
   }
 
   async stopListening(): Promise<void> {
+    const wasListening = this.isListening;
     this.bumpSession();
     this.isListening = false;
-    this.clearNativeListeners();
 
     if (Platform.OS === 'web') {
+      this.clearNativeListeners();
       if (this.webRecognition) {
         try {
           this.webRecognition.stop();
@@ -130,10 +151,41 @@ class VoiceRecognitionManager {
     }
 
     const speech = await getSpeechRecognitionModule();
-    if (speech) {
+    if (speech && wasListening) {
+      // Listen for native `end` before clearing session listeners so stop→start can serialize.
+      const endPromise = new Promise<void>((resolve) => {
+        let settled = false;
+        const done = () => {
+          if (settled) return;
+          settled = true;
+          resolve();
+        };
+        try {
+          const sub = speech.ExpoSpeechRecognitionModule.addListener('end', () => {
+            try {
+              sub.remove();
+            } catch {}
+            done();
+          });
+          setTimeout(() => {
+            try {
+              sub.remove();
+            } catch {}
+            done();
+          }, 800);
+        } catch {
+          done();
+        }
+      });
+
+      this.clearNativeListeners();
       try {
         speech.ExpoSpeechRecognitionModule.stop();
       } catch {}
+      this.lastNativeStopAt = Date.now();
+      await endPromise;
+    } else {
+      this.clearNativeListeners();
     }
   }
 
@@ -274,9 +326,16 @@ class VoiceRecognitionManager {
     this.nativeListeners.push(
       ExpoSpeechRecognitionModule.addListener('result', (event: { results?: { transcript: string }[] }) => {
         if (this.isStaleSession(session)) return;
-        const transcript = event.results?.[0]?.transcript ?? '';
-        if (transcript) {
-          callbacks.onResult?.(transcript);
+        const results = event.results ?? [];
+        let bestTranscript = '';
+        for (const result of results) {
+          const transcript = result.transcript ?? '';
+          if (transcript.length > bestTranscript.length) {
+            bestTranscript = transcript;
+          }
+        }
+        if (bestTranscript) {
+          callbacks.onResult?.(bestTranscript);
         }
       }),
     );
@@ -302,7 +361,7 @@ class VoiceRecognitionManager {
         lang: 'en-US',
         interimResults: true,
         continuous: true,
-        maxAlternatives: 1,
+        maxAlternatives: 3,
       });
     } catch (e: any) {
       callbacks.onError?.(e.message || 'Failed to start recognition');

@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { View, Text, StyleSheet, Pressable, Platform, useWindowDimensions, ScrollView, Switch } from 'react-native';
 import Animated, { useSharedValue, useAnimatedStyle, withTiming, withRepeat, withSequence, withDelay } from 'react-native-reanimated';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -8,6 +8,7 @@ import { getColors } from '@/constants/colors';
 import { type ArduinoConnectionStatus } from '@/lib/arduino-serial';
 import { type TrainingMode } from '@/contexts/CPRTrainingContext';
 import { useTheme } from '@/contexts/ThemeContext';
+import { voiceRecognition } from '@/lib/voice-recognition';
 
 interface StartScreenProps {
   connectionStatus: ArduinoConnectionStatus;
@@ -39,6 +40,11 @@ export function StartScreen({ connectionStatus, onConnect, onStart, onOpenSettin
   const heartScale = useSharedValue(1);
   const titleOpacity = useSharedValue(0);
   const btnOpacity = useSharedValue(0);
+  const [speechAvailable, setSpeechAvailable] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    void voiceRecognition.isAvailable().then(setSpeechAvailable);
+  }, []);
 
   useEffect(() => {
     heartScale.value = withRepeat(
@@ -138,6 +144,17 @@ export function StartScreen({ connectionStatus, onConnect, onStart, onOpenSettin
             ))}
           </View>
         </Animated.View>
+
+        {speechAvailable === false && (
+          <View style={[styles.speechWarning, { backgroundColor: `${C.warning}22`, borderColor: `${C.warning}55` }]}>
+            <MaterialCommunityIcons name="microphone-off" size={18} color={C.warning} />
+            <Text style={[styles.speechWarningText, { color: C.textSecondary }]}>
+              {Platform.OS === 'android'
+                ? 'Voice steps need Google speech services. Install the Google app, or use "I said it" during training.'
+                : 'Voice recognition is unavailable in this browser. Use "I said it" during voice steps.'}
+            </Text>
+          </View>
+        )}
 
         <Animated.View style={[styles.actions, btnStyle, isNarrow && { maxWidth: '100%', paddingHorizontal: 12 }]}>
           <Pressable
@@ -264,6 +281,24 @@ const styles = StyleSheet.create({
     fontSize: 10,
     textAlign: 'center',
     lineHeight: 13,
+  },
+  speechWarning: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    marginTop: 12,
+    marginBottom: 4,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    maxWidth: 520,
+    width: '100%',
+  },
+  speechWarningText: {
+    flex: 1,
+    fontSize: 12,
+    lineHeight: 17,
   },
   actions: {
     gap: 12,

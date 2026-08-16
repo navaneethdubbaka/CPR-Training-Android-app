@@ -64,13 +64,13 @@ export function pickPreferredUsbDevice(
 ): UsbDevice | null {
   if (devices.length === 0) return null;
 
-  const arduinoDevice = devices.find(d => ARDUINO_VENDOR_IDS.includes(d.vendorId));
-  if (arduinoDevice) return arduinoDevice;
-
   if (selectedDeviceId !== null) {
     const selected = devices.find(d => d.deviceId === selectedDeviceId);
     if (selected) return selected;
   }
+
+  const arduinoDevice = devices.find(d => ARDUINO_VENDOR_IDS.includes(d.vendorId));
+  if (arduinoDevice) return arduinoDevice;
 
   return devices[0];
 }
@@ -151,17 +151,40 @@ class NativeUsbSerialManager {
     }
   }
 
-  private async requestPermissionWithRetry(deviceId: number, timeoutMs = 3000): Promise<boolean> {
-    let granted = await this.UsbSerialManagerModule.tryRequestPermission(deviceId);
-    if (granted) return true;
+  private async requestPermissionWithRetry(deviceId: number, timeoutMs = 20000): Promise<boolean> {
+    const already = await this.UsbSerialManagerModule.hasPermission(deviceId);
+    if (already) return true;
+
+    // Request once — re-calling tryRequestPermission re-shows the dialog.
+    await this.UsbSerialManagerModule.tryRequestPermission(deviceId);
 
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
       await sleep(300);
-      granted = await this.UsbSerialManagerModule.tryRequestPermission(deviceId);
+      const granted = await this.UsbSerialManagerModule.hasPermission(deviceId);
       if (granted) return true;
     }
     return false;
+  }
+
+  /** Close port and clear buffers without emitting status (safe during connect). */
+  private cleanupResources() {
+    if (this.dataSubscription) {
+      this.dataSubscription.remove();
+      this.dataSubscription = null;
+    }
+
+    if (this.usbSerial) {
+      try {
+        this.usbSerial.close();
+      } catch (e) {
+        console.log('[USB Serial] Error closing:', e);
+      }
+      this.usbSerial = null;
+    }
+
+    this.connectedDeviceId = null;
+    this.lineBuffer = '';
   }
 
   async connect(deviceId: number, baudRate: number = 115200): Promise<boolean> {
@@ -171,7 +194,7 @@ class NativeUsbSerialManager {
     }
 
     try {
-      this.disconnect();
+      this.cleanupResources();
 
       const hasPermission = await this.requestPermissionWithRetry(deviceId);
       if (!hasPermission) {
@@ -236,22 +259,7 @@ class NativeUsbSerialManager {
   }
 
   disconnect() {
-    if (this.dataSubscription) {
-      this.dataSubscription.remove();
-      this.dataSubscription = null;
-    }
-
-    if (this.usbSerial) {
-      try {
-        this.usbSerial.close();
-      } catch (e) {
-        console.log('[USB Serial] Error closing:', e);
-      }
-      this.usbSerial = null;
-    }
-
-    this.connectedDeviceId = null;
-    this.lineBuffer = '';
+    this.cleanupResources();
     this.emitStatus('disconnected');
   }
 

@@ -246,15 +246,55 @@ The web client talks to `http://localhost:5000` (WebSocket `/ws/arduino`) only w
 
 ---
 
-## Android (not web) — quick pointer
+## Android (custom dev build)
 
-Pose on a **physical Android tablet/phone** uses a **custom dev build** (Vision Camera + TFLite), not Expo Go:
+Pose on a **physical Android tablet/phone** uses Vision Camera + TFLite (not Expo Go). USB Arduino connects via **USB OTG**, equivalent to Web Serial on desktop.
+
+### Prerequisites
+
+1. **Node 20** and Android SDK / device or emulator with USB debugging
+2. **Custom dev client** — required for pose, USB OTG, and on-device speech:
 
 ```bash
+npm install
 npx expo run:android
 ```
 
-See `replit.md` in the repo for hardware/USB details.
+Or build an APK with EAS (`eas.json` profiles: development/preview APK, production AAB).
+
+### First-time setup on Android
+
+| Task | Steps |
+|------|--------|
+| **Arduino USB** | Flash `attached_assets/analog_hardware_serial/analog_hardware_serial.ino` at 115200 baud. Plug Arduino into the tablet via **USB OTG**. Settings → Connection → **Auto** or **USB OTG** → Connect. Grant USB permission when prompted. |
+| **Demo without hardware** | Settings → Connection → turn **Hardware Only Mode** **OFF**, then Start. |
+| **WebSocket mode** | On a PC: `npm run server:dev`. On the tablet: Settings → **WebSocket Bridge** → set **Backend Server Host** to your PC LAN IP (e.g. `192.168.1.10:5000`). Do **not** use `localhost` on a physical device. |
+| **Voice steps (1–3)** | Requires Google speech services (Google app). If unavailable, tap **"I said it — continue"** during training. |
+| **Camera / pose** | Allow camera + microphone at first launch. Use a low-angle tablet setup like the web guide (steps 1–3 framing, step 4 hand placement). |
+
+### Android feature parity with web
+
+| Feature | Android |
+|--------|---------|
+| Training / Testing / C.O.L.S. | Yes |
+| Pose tracking (MoveNet TFLite) | Yes — custom build only |
+| Hand placement gate (~1.5s) | Yes |
+| Voice steps 1–3 | Yes (Google STT or manual confirm) |
+| Arduino sensors | USB OTG (primary), BLE, TCP, WebSocket bridge |
+| Simulation | Yes — Hardware Only OFF |
+| Session report | Share JSON via system share sheet |
+
+### Troubleshooting (Android)
+
+| Problem | What to try |
+|--------|-------------|
+| USB not detected | Replug OTG cable; Settings → USB Devices → Scan; grant USB permission; rebuild after plugin changes (`npx expo prebuild --clean` then `npx expo run:android`) |
+| WebSocket won't connect | Set backend host to PC LAN IP, same WiFi, `npm run server:dev` running |
+| Voice step stuck | Install Google app; or use **I said it — continue** |
+| Pose skeleton offset | Use front camera at low angle; flip camera if needed; improve lighting |
+| Expo Go | **Not supported** for pose/USB — use `expo run:android` |
+
+See `replit.md` for hardware profiles, channel calibration, and patch-package notes.
 
 ---
 

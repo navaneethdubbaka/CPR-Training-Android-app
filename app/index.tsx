@@ -25,7 +25,6 @@ import { EnduranceScreen } from '@/components/EnduranceScreen';
 import { StepVideo } from '@/components/StepVideo';
 import type { CPRPostureResult } from '@/lib/pose-analysis';
 import { FRAMING_HOLD_MS, getPoseCheckModeForStep, isFramingGateReady } from '@/lib/cpr-pose-constants';
-import { useVoiceListening } from '@/contexts/VoiceListeningContext';
 
 const ENABLE_POSE_VOICE_CUES = true;
 
@@ -68,7 +67,6 @@ export default function TrainingScreen() {
   const totalCycles = isTesting ? CYCLES_TESTING : CYCLES_TRAINING;
   const postShockTotalCycles = isTesting ? POST_SHOCK_CYCLES_TESTING : POST_SHOCK_CYCLES_TRAINING;
   const poseCheckMode = getPoseCheckModeForStep(currentStepId);
-  const { isVoiceListening } = useVoiceListening();
   const showVisualCamera = !isAedStep(currentStepId);
   const showPoseTracking = showVisualCamera && poseCheckMode !== null;
 
@@ -191,6 +189,16 @@ export default function TrainingScreen() {
     const isCycleStep =
       currentStep?.id === 'compressions' || currentStep?.id === 'post_aed_compressions';
     if (isCycleStep && canAutoAdvance) return true;
+
+    // Voice-driven early steps: framing is coaching only, not a hard gate.
+    const isVoiceStep =
+      currentStep?.id === 'scene_safety' ||
+      currentStep?.id === 'check_responsiveness' ||
+      currentStep?.id === 'call_911';
+    if (isVoiceStep) {
+      return currentStep?.autoAdvance ? canAutoAdvance : true;
+    }
+
     return framingGateOpen && (currentStep?.autoAdvance ? canAutoAdvance : true);
   }, [currentStep, canAutoAdvance, framingGateOpen]);
 
@@ -344,7 +352,7 @@ export default function TrainingScreen() {
         onHandDetected={currentStep?.id === 'hand_placement' ? verifyHandPlacement : undefined}
         onPostureResult={setPostureResult}
         enableHandTracking={showPoseTracking}
-        isPaused={isPaused || (Platform.OS === 'android' && isVoiceListening)}
+        isPaused={isPaused}
         poseCheckMode={poseCheckMode ?? 'full_cpr'}
         currentStepId={currentStepId}
       />

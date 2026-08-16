@@ -448,33 +448,6 @@ export function PoseCameraView({
       console.log(`[PoseCamera] parsed nose: x=${kps[0]?.x.toFixed(4)} y=${kps[0]?.y.toFixed(4)} score=${kps[0]?.score.toFixed(4)}`);
     }
 
-    if (Platform.OS === 'android') {
-      kps = kps.map(kp => {
-        let x = kp.x;
-        let y = kp.y;
-
-        // Front camera preview is mirrored natively by VisionCamera
-        if (isFrontFacing) {
-           x = 1 - x;
-        }
-
-        // Map the center 192x192 square back to the full video dimensions.
-        if (videoHeight > videoWidth) {
-           const squareRatio = videoWidth / videoHeight;
-           const offset = (1 - squareRatio) / 2;
-           y = offset + y * squareRatio;
-        } else if (videoWidth > videoHeight) {
-           const squareRatio = videoHeight / videoWidth;
-           const offset = (1 - squareRatio) / 2;
-           x = offset + x * squareRatio;
-        }
-
-        return { ...kp, x, y };
-      });
-    }
-
-
-
     const result = analyzeCPRPosture(kps, 'low_angle_45', poseCheckMode, framingZone);
 
     setInferenceTickCount(c => c + 1);
@@ -613,16 +586,9 @@ export function PoseCameraView({
         }
       }
 
-      // 1. Calculate a perfect center square crop to prevent any out-of-bounds reads.
-      // If the sensor is landscape (1920x1080), this crops the center 1080x1080.
-      // If the sensor is portrait (1080x1920), this crops the center 1080x1080.
-      const minDim = Math.min(frame.width, frame.height);
-      const cropX = (frame.width - minDim) / 2;
-      const cropY = (frame.height - minDim) / 2;
-
+      // Scale the full frame to 192x192 (matches web TF.js full-frame contract).
       const resized = resize(frame, {
-        crop: { x: cropX, y: cropY, width: minDim, height: minDim },
-        scale: { width: 192, height: 192 }, 
+        scale: { width: 192, height: 192 },
         pixelFormat: 'rgb',
         dataType: 'uint8',
         rotation: nativeRotation,

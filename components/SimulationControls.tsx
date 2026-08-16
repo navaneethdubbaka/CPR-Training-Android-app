@@ -45,20 +45,16 @@ export function SimulationControls({
                 label="Left Shoulder"
                 icon="hand-back-left"
                 active={sensorState.leftShoulder}
-                // onPressIn={() => onSimulateSensor('leftShoulder', true)}
-                // onPressOut={() => onSimulateSensor('leftShoulder', false)}
-                  onPressIn={() => onSimulateSensor('leftShoulder', true)}
-                  onPressOut={() => {}}
+                onPressIn={() => onSimulateSensor('leftShoulder', true)}
+                onPressOut={() => onSimulateSensor('leftShoulder', false)}
                 colors={ThemedColors}
               />
               <SimButton
                 label="Right Shoulder"
                 icon="hand-back-right"
                 active={sensorState.rightShoulder}
-                // onPressIn={() => onSimulateSensor('rightShoulder', true)}
-                // onPressOut={() => onSimulateSensor('rightShoulder', false)}
-                  onPressIn={() => onSimulateSensor('rightShoulder', true)}
-                  onPressOut={() => {}}
+                onPressIn={() => onSimulateSensor('rightShoulder', true)}
+                onPressOut={() => onSimulateSensor('rightShoulder', false)}
                 colors={ThemedColors}
               />
             </View>
@@ -116,7 +112,7 @@ export function SimulationControls({
                 icon="flash"
                 active={sensorState.aedPadUpper}
                 onPressIn={() => onSimulateSensor('aedUpper', true)}
-                onPressOut={() => {}}
+                onPressOut={() => onSimulateSensor('aedUpper', false)}
                 colors={ThemedColors}
               />
               <SimButton
@@ -124,7 +120,7 @@ export function SimulationControls({
                 icon="flash"
                 active={sensorState.aedPadLower}
                 onPressIn={() => onSimulateSensor('aedLower', true)}
-                onPressOut={() => {}}
+                onPressOut={() => onSimulateSensor('aedLower', false)}
                 colors={ThemedColors}
               />
             </View>

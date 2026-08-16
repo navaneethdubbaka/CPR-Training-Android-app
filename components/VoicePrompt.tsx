@@ -33,6 +33,7 @@ interface VoicePromptProps {
   matchMode?: VoiceMatchMode;
   helpMinCount?: number;
   showHint?: boolean;
+  allowManualConfirm?: boolean;
   onSuccess: () => void;
   onFailure?: (heard: string) => void;
   autoStart?: boolean;
@@ -110,6 +111,7 @@ export function VoicePrompt({
   matchMode = 'phrase',
   helpMinCount = 2,
   showHint = true,
+  allowManualConfirm = true,
   onSuccess,
   onFailure,
   autoStart = true,
@@ -121,6 +123,7 @@ export function VoicePrompt({
   const [heardText, setHeardText] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
   const [permissionStatus, setPermissionStatus] = useState<MicPermissionStatus | null>(null);
+  const [speechAvailable, setSpeechAvailable] = useState<boolean | null>(null);
   const micPulse = useSharedValue(1);
   const isMounted = useRef(true);
   const lastTranscriptRef = useRef('');
@@ -146,6 +149,9 @@ export function VoicePrompt({
 
   useEffect(() => {
     isMounted.current = true;
+    void voiceRecognition.isAvailable().then((available) => {
+      if (isMounted.current) setSpeechAvailable(available);
+    });
     return () => {
       isMounted.current = false;
       clearRestartTimer();
@@ -175,6 +181,21 @@ export function VoicePrompt({
     setVoiceListening(state === 'starting');
   }, [setVoiceListening]);
 
+  const handleManualConfirm = useCallback(() => {
+    if (disabled || successFiredRef.current) return;
+    successFiredRef.current = true;
+    clearRestartTimer();
+    cancelAnimation(micPulse);
+    micPulse.value = withTiming(1, { duration: 200 });
+    setMicStateSafe('recognized');
+    setVoiceListening(false);
+    void voiceRecognition.stopListening();
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    setTimeout(() => {
+      if (isMounted.current) onSuccess();
+    }, 400);
+  }, [disabled, clearRestartTimer, setMicStateSafe, setVoiceListening, micPulse, onSuccess]);
+
   const handlePermissionDenied = useCallback((status: MicPermissionStatus) => {
     setPermissionStatus(status);
     cancelAnimation(micPulse);
@@ -191,15 +212,25 @@ export function VoicePrompt({
     if (!isMounted.current || successFiredRef.current || isMutedRef.current) return;
     setErrorMessage('');
     setHeardText('');
+    // Drop to idle so startListening's anti-thrash guard allows a controlled restart.
+    micStateRef.current = 'idle';
+    setMicState('idle');
+    setVoiceListening(false);
     scheduleRestart(() => {
       if (isMounted.current && !successFiredRef.current && !isMutedRef.current) {
         void startListeningRef.current();
       }
     });
-  }, [scheduleRestart]);
+  }, [scheduleRestart, setVoiceListening]);
 
   const startListening = useCallback(async () => {
     if (!isMounted.current || disabled || successFiredRef.current || isMutedRef.current) return;
+
+    // Avoid thrashing Android SpeechRecognizer when parent re-renders.
+    const current = micStateRef.current;
+    if (current === 'starting' || current === 'listening' || current === 'recognized') {
+      return;
+    }
 
     clearRestartTimer();
     setErrorMessage('');
@@ -214,9 +245,14 @@ export function VoicePrompt({
     }
 
     const available = await voiceRecognition.isAvailable();
+    setSpeechAvailable(available);
     if (!available) {
       setMicStateSafe('failed');
-      setErrorMessage('Speech recognition not available on this device');
+      setErrorMessage(
+        Platform.OS === 'android'
+          ? 'Speech recognition unavailable — install Google app or tap "I said it"'
+          : 'Speech recognition not available on this device',
+      );
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Error);
       return;
     }
@@ -305,14 +341,15 @@ export function VoicePrompt({
     startListeningRef.current = startListening;
   }, [startListening]);
 
+  // Stable deps only — do not depend on startListening identity (changes every parent render).
   useEffect(() => {
     if (autoStart && !disabled && !isMuted) {
       const t = setTimeout(() => {
-        void startListening();
+        void startListeningRef.current();
       }, AUTO_START_DELAY_MS);
       return () => clearTimeout(t);
     }
-  }, [autoStart, disabled, isMuted, startListening]);
+  }, [autoStart, disabled, isMuted]);
 
   const micPulseStyle = useAnimatedStyle(() => ({
     transform: [{ scale: micPulse.value }],
@@ -383,6 +420,13 @@ export function VoicePrompt({
           </View>
         )}
       </View>
+
+      {(micState === 'failed' || speechAvailable === false) && allowManualConfirm && (
+        <Pressable style={styles.settingsBtn} onPress={handleManualConfirm}>
+          <MaterialCommunityIcons name="check-circle-outline" size={16} color={Colors.accentLight} />
+          <Text style={styles.settingsBtnText}>I said it — continue</Text>
+        </Pressable>
+      )}
 
       {micState === 'permission_denied' && (
         <Pressable

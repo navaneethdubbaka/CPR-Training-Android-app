@@ -52,12 +52,6 @@
             "action": "android.speech.RecognitionService"
           }
         }
-      ],
-      "intentFilters": [
-        {
-          "action": "android.hardware.usb.action.USB_DEVICE_ATTACHED",
-          "category": ["android.intent.category.DEFAULT"]
-        }
       ]
     },
     "web": {

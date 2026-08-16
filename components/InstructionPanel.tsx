@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { View, Text, StyleSheet, Pressable } from 'react-native';
 import Animated, { useSharedValue, useAnimatedStyle, withTiming, withRepeat, withSequence } from 'react-native-reanimated';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -110,6 +110,20 @@ export function InstructionPanel({
   const useVoiceForStep = isSceneSafety || isCheckResponsiveness || isCall911;
 
   const checkResponsivenessAllDone = isCheckResponsiveness && (voiceCompleted ?? false) && (shoulderTapDone ?? false);
+
+  const handleSceneSafetySuccess = useCallback(() => {
+    onVoiceSuccess?.();
+    setTimeout(() => onAdvance(), 300);
+  }, [onVoiceSuccess, onAdvance]);
+
+  const handleResponsivenessVoiceSuccess = useCallback(() => {
+    onVoiceSuccess?.();
+  }, [onVoiceSuccess]);
+
+  const handleCall911Success = useCallback(() => {
+    onVoiceSuccess?.();
+    setTimeout(() => onAdvance(), 400);
+  }, [onVoiceSuccess, onAdvance]);
 
   const showAdvanceButton = () => {
     if (isCheckResponsiveness) return false;
@@ -232,10 +246,7 @@ export function InstructionPanel({
           targetPhrase="scene is safe"
           matchMode="scene_safe"
           showHint={showVoiceHint}
-          onSuccess={() => {
-            onVoiceSuccess?.();
-            setTimeout(() => onAdvance(), 300);
-          }}
+          onSuccess={handleSceneSafetySuccess}
         />
       )}
 
@@ -270,9 +281,7 @@ export function InstructionPanel({
               targetPhrase="are you okay"
               matchMode="responsive_check"
               showHint={showVoiceHint}
-              onSuccess={() => {
-                onVoiceSuccess?.();
-              }}
+              onSuccess={handleResponsivenessVoiceSuccess}
               disabled={voiceCompleted ?? false}
             />
           )}
@@ -303,10 +312,7 @@ export function InstructionPanel({
           targetPhrase="help"
           matchMode="help_shout"
           showHint={showVoiceHint}
-          onSuccess={() => {
-            onVoiceSuccess?.();
-            setTimeout(() => onAdvance(), 400);
-          }}
+          onSuccess={handleCall911Success}
           disabled={voiceCompleted ?? false}
         />
       )}

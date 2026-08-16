@@ -323,8 +323,14 @@ export function CompletionScreen({
         style={({ pressed }) => [styles.downloadBtn, { backgroundColor: Colors.surface, borderColor: Colors.border }, pressed && { opacity: 0.8 }]}
         onPress={() => void handleDownloadReport()}
       >
-        <MaterialCommunityIcons name="download" size={20} color={Colors.info} />
-        <Text style={[styles.downloadText, { color: Colors.info }]}>Download Report (JSON)</Text>
+        <MaterialCommunityIcons
+          name={Platform.OS === 'web' ? 'download' : 'share-variant'}
+          size={20}
+          color={Colors.info}
+        />
+        <Text style={[styles.downloadText, { color: Colors.info }]}>
+          {Platform.OS === 'web' ? 'Download Report (JSON)' : 'Share Report (JSON)'}
+        </Text>
       </Pressable>
 
       <Pressable

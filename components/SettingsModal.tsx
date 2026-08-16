@@ -45,17 +45,16 @@ type IconName = React.ComponentProps<typeof MaterialCommunityIcons>['name'];
 
 const WEB_CONNECTION_OPTIONS: { key: PreferredConnection; label: string; icon: IconName; desc: string }[] = [
   { key: 'webserial', label: 'USB (Web Serial)', icon: 'usb', desc: 'Chrome USB — primary' },
-  { key: 'websocket', label: 'WebSocket', icon: 'lan-connect', desc: 'Via backend server' },
-  { key: 'tcp', label: 'WiFi/TCP', icon: 'wifi', desc: 'ESP32 WebSocket bridge' },
+  { key: 'websocket', label: 'WebSocket Bridge', icon: 'lan-connect', desc: 'Via backend server' },
+  { key: 'tcp', label: 'WiFi WebSocket', icon: 'wifi', desc: 'ESP32 WS bridge (ws://)' },
 ];
 
 const NATIVE_CONNECTION_OPTIONS: { key: PreferredConnection; label: string; icon: IconName; desc: string }[] = [
-  { key: 'auto', label: 'Auto', icon: 'auto-fix', desc: 'USB → BLE → WiFi → WS' },
+  { key: 'auto', label: 'Auto', icon: 'auto-fix', desc: 'USB OTG first' },
   { key: 'usb', label: 'USB OTG', icon: 'usb', desc: 'Direct Android USB' },
   { key: 'ble', label: 'Bluetooth', icon: 'bluetooth', desc: 'BLE serial module' },
-  { key: 'tcp', label: 'WiFi/TCP', icon: 'wifi', desc: 'ESP32 or network' },
-  { key: 'webserial', label: 'Web Serial', icon: 'serial-port', desc: 'Chrome browser USB' },
-  { key: 'websocket', label: 'WebSocket', icon: 'lan-connect', desc: 'Via backend server' },
+  { key: 'tcp', label: 'WiFi TCP Socket', icon: 'wifi', desc: 'Raw TCP (telnet-style)' },
+  { key: 'websocket', label: 'WebSocket Bridge', icon: 'lan-connect', desc: 'Via PC backend server' },
 ];
 
 function getConnectedModeLabel(
@@ -65,9 +64,9 @@ function getConnectedModeLabel(
   if (connectionMode === 'webserial' && isWeb) return 'USB (Web Serial)';
   if (connectionMode === 'usb') return 'USB OTG';
   if (connectionMode === 'ble') return 'Bluetooth LE';
-  if (connectionMode === 'tcp') return 'WiFi/TCP';
+  if (connectionMode === 'tcp') return isWeb ? 'WiFi WebSocket' : 'WiFi TCP Socket';
   if (connectionMode === 'webserial') return 'Web Serial';
-  if (connectionMode === 'hardware') return 'WebSocket';
+  if (connectionMode === 'hardware') return 'WebSocket Bridge';
   return connectionMode;
 }
 
@@ -82,7 +81,9 @@ function getDisconnectedHint(
     if (preferredConnection === 'tcp') return 'Connect via WiFi/TCP';
     return 'Connect Arduino via USB (Web Serial) in Chrome';
   }
-  if (preferredConnection === 'auto') return 'Connect via USB/BLE/TCP';
+  if (preferredConnection === 'auto') return 'Connect Arduino via USB OTG';
+  if (preferredConnection === 'websocket') return 'Set backend host and start server';
+  if (preferredConnection === 'tcp') return isWeb ? 'Connect via WiFi WebSocket' : 'Connect via WiFi TCP socket';
   return `Connect via ${preferredConnection}`;
 }
 
@@ -695,6 +696,7 @@ export function SettingsModal({ visible, onClose, connectionStatus, onConnect, o
   const [loadingBle, setLoadingBle] = useState(false);
   const [selectedBleId, setSelectedBleId] = useState<string | null>(null);
   const [tcpConfig, setTcpConfig] = useState(arduinoSerial.getTcpConfig());
+  const [backendHost, setBackendHost] = useState(arduinoSerial.getBackendHost());
   const [hardwareProfileId, setHardwareProfileId] = useState<HardwareProfileId>(arduinoSerial.getHardwareProfileId());
   const [forceMinPeakInput, setForceMinPeakInput] = useState(String(arduinoSerial.getForceMinPeak()));
   const [connectionError, setConnectionError] = useState(arduinoSerial.getLastConnectionError());
@@ -705,7 +707,7 @@ export function SettingsModal({ visible, onClose, connectionStatus, onConnect, o
   const showWebSerialSection = isWeb && (
     preferredConnection === 'webserial' || preferredConnection === 'usb' || preferredConnection === 'auto'
   );
-  const showServerPorts = !isWeb || preferredConnection === 'websocket';
+  const showServerPorts = preferredConnection === 'websocket';
 
   useEffect(() => {
     if (!visible) return;
@@ -797,9 +799,11 @@ export function SettingsModal({ visible, onClose, connectionStatus, onConnect, o
     try {
       const ports = arduinoSerial.getAvailablePorts();
       setAvailablePorts(ports);
-      const baseUrl = Platform.OS === 'web'
-        ? window.location.origin.replace(':8081', ':5000')
-        : 'http://localhost:5000';
+      const baseUrl = arduinoSerial.getBackendUrl();
+      if (!baseUrl) {
+        setLoadingPorts(false);
+        return;
+      }
       const res = await fetch(`${baseUrl}/api/arduino/ports`);
       if (res.ok) {
         const data = await res.json();
@@ -807,6 +811,11 @@ export function SettingsModal({ visible, onClose, connectionStatus, onConnect, o
       }
     } catch {}
     setLoadingPorts(false);
+  };
+
+  const handleBackendHostChange = (host: string) => {
+    setBackendHost(host);
+    arduinoSerial.setBackendHost(host);
   };
 
   const refreshUsbDevices = async () => {
@@ -981,8 +990,8 @@ export function SettingsModal({ visible, onClose, connectionStatus, onConnect, o
                   Assign a video to each CPR step. During training, the video plays above the step instructions.
                   {' Tap '}
                   <Text style={{ fontWeight: '700' }}>Bundled</Text>
-                  {' to use an MP4 from assets/videos/, or '}
-                  {Platform.OS === 'web' ? 'paste a URL.' : 'tap Gallery to pick from your device.'}
+                  {' to use an MP4 from assets/videos/, paste a URL, or '}
+                  {Platform.OS === 'web' ? 'use the field below.' : 'tap Gallery to pick from your device.'}
                 </Text>
               </View>
               <View style={styles.section}>
@@ -1019,24 +1028,23 @@ export function SettingsModal({ visible, onClose, connectionStatus, onConnect, o
                           <Text style={[styles.videoAssignBtnText, { color: C.accent }]}>Bundled</Text>
                         </Pressable>
 
-                        {/* Gallery picker (Android/iOS) or URL input (web) */}
-                        {Platform.OS === 'web' ? (
-                          <TextInput
-                            style={styles.videoUrlInput}
-                            value={uri && !isBundledKey(uri) ? uri : ''}
-                            onChangeText={async (text) => {
-                              if (text.trim()) {
-                                await videoAssignments.set(step.id, text.trim());
-                              } else {
-                                await videoAssignments.remove(step.id);
-                              }
-                            }}
-                            placeholder="or paste URL…"
-                            placeholderTextColor={Colors.textMuted}
-                            keyboardType="url"
-                            autoCapitalize="none"
-                          />
-                        ) : (
+                        {/* URL input (web + Android) or gallery (native) */}
+                        <TextInput
+                          style={styles.videoUrlInput}
+                          value={uri && !isBundledKey(uri) && (Platform.OS === 'web' || uri.startsWith('http')) ? uri : ''}
+                          onChangeText={async (text) => {
+                            if (text.trim()) {
+                              await videoAssignments.set(step.id, text.trim());
+                            } else if (!uri || uri.startsWith('http')) {
+                              await videoAssignments.remove(step.id);
+                            }
+                          }}
+                          placeholder="or paste URL…"
+                          placeholderTextColor={Colors.textMuted}
+                          keyboardType="url"
+                          autoCapitalize="none"
+                        />
+                        {Platform.OS !== 'web' && (
                           <Pressable
                             style={styles.videoAssignBtn}
                             onPress={async () => {
@@ -1243,9 +1251,9 @@ export function SettingsModal({ visible, onClose, connectionStatus, onConnect, o
                     </View>
                   )}
 
-                  {(preferredConnection === 'tcp' || (!isWeb && preferredConnection === 'auto')) && (
+                  {preferredConnection === 'tcp' && (
                     <View style={styles.section}>
-                      <Text style={styles.sectionTitle}>WiFi / TCP Connection</Text>
+                      <Text style={styles.sectionTitle}>{isWeb ? 'WiFi WebSocket' : 'WiFi TCP Socket'}</Text>
                       <View style={styles.tcpRow}>
                         <View style={{ flex: 2 }}>
                           <Text style={styles.inputLabel}>IP Address</Text>
@@ -1271,8 +1279,30 @@ export function SettingsModal({ visible, onClose, connectionStatus, onConnect, o
                         </View>
                       </View>
                       <Text style={[styles.portMfg, { marginTop: 6 }]}>
-                        Use for ESP32/ESP8266 with WiFi, or any Arduino with Ethernet shield using a TCP socket server.
+                        {isWeb
+                          ? 'Use for ESP32/ESP8266 firmware that exposes a WebSocket server (ws://host:port).'
+                          : 'Use for ESP32/ESP8266 with WiFi, or any Arduino with Ethernet shield using a raw TCP socket server.'}
                       </Text>
+                    </View>
+                  )}
+
+                  {preferredConnection === 'websocket' && (
+                    <View style={styles.section}>
+                      <Text style={styles.sectionTitle}>Backend Server Host</Text>
+                      <Text style={[styles.portMfg, { marginBottom: 8 }]}>
+                        {isWeb
+                          ? 'Uses this browser host by default. Override only for remote servers.'
+                          : 'PC running npm run server:dev on the same WiFi (e.g. 192.168.1.10:5000). Do not use localhost on a physical device.'}
+                      </Text>
+                      <TextInput
+                        style={styles.portInput}
+                        value={backendHost}
+                        onChangeText={handleBackendHostChange}
+                        placeholder={isWeb ? 'auto (this PC)' : '192.168.1.10:5000'}
+                        placeholderTextColor={C.textMuted}
+                        autoCapitalize="none"
+                        autoCorrect={false}
+                      />
                     </View>
                   )}
 

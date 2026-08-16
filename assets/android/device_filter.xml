@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <!-- Arduino Mega 2560 (vendor 9025 / 10755) -->
+  <usb-device vendor-id="9025" product-id="16" />
+  <usb-device vendor-id="9025" product-id="66" />
+  <usb-device vendor-id="10755" product-id="16" />
+  <usb-device vendor-id="10755" product-id="66" />
+  <!-- Arduino Uno -->
+  <usb-device vendor-id="9025" product-id="67" />
+  <usb-device vendor-id="9025" product-id="1" />
+  <!-- Arduino Nano -->
+  <usb-device vendor-id="9025" product-id="73" />
+  <!-- CH340/CH341 (clone boards) -->
+  <usb-device vendor-id="6790" product-id="29987" />
+  <usb-device vendor-id="6790" product-id="21795" />
+  <!-- CP2102/CP2104 (ESP32, FTDI) -->
+  <usb-device vendor-id="4292" product-id="60032" />
+  <usb-device vendor-id="4292" product-id="60049" />
+  <!-- FTDI -->
+  <usb-device vendor-id="1027" product-id="24577" />
+  <usb-device vendor-id="1027" product-id="24592" />
+  <usb-device vendor-id="1027" product-id="24593" />
+  <!-- PL2303 (Prolific) -->
+  <usb-device vendor-id="1659" product-id="8963" />
+</resources>

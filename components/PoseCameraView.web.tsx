@@ -127,6 +127,11 @@ export function PoseCameraView({
     return () => stopWebStream();
   }, [startWebCamera, stopWebStream]);
 
+  useEffect(() => {
+    goodSinceRef.current = null;
+    handDetectedFiredRef.current = false;
+  }, [currentStepId, poseCheckMode]);
+
   const handlePostureResult = useCallback((kps: PoseKeypoint[], result: CPRPostureResult) => {
     setKeypoints(kps);
     setPostureResult(result);
