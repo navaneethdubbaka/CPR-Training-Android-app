@@ -7,7 +7,7 @@ import { getColors } from '@/constants/colors';
 import { useTheme } from '@/contexts/ThemeContext';
 import {
   CPR_STEPS, CYCLES_TRAINING, CYCLES_TESTING, POST_SHOCK_CYCLES_TRAINING, POST_SHOCK_CYCLES_TESTING,
-  COMPRESSIONS_PER_CYCLE, BREATHS_PER_CYCLE, isAedStep,
+  COMPRESSIONS_PER_CYCLE, BREATHS_PER_CYCLE, isAedStep, isResultsStep,
 } from '@/constants/cpr-protocol';
 import { useCPRTraining } from '@/contexts/CPRTrainingContext';
 import { StepIndicator } from '@/components/StepIndicator';
@@ -59,7 +59,7 @@ export default function TrainingScreen() {
   } = useCPRTraining();
 
   const currentStep = CPR_STEPS[currentStepIndex];
-  const isComplete = currentStepIndex >= CPR_STEPS.length;
+  const isComplete = isResultsStep(currentStepId) || isResultsStep(currentStep?.id);
 
   const isTesting = mode === 'testing';
   const isCOLS = mode === 'cols';

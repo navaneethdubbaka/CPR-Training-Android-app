@@ -29,7 +29,7 @@ import {
 import type { BleDevice } from '@/lib/ble-serial';
 import { videoAssignments, type VideoAssignments } from '@/lib/video-assignments';
 import { getBundledVideoList, isBundledKey, bundledLabel } from '@/lib/bundled-videos';
-import { CPR_STEPS } from '@/constants/cpr-protocol';
+import { CPR_TRAINING_STEPS } from '@/constants/cpr-protocol';
 
 interface SettingsModalProps {
   visible: boolean;
@@ -996,7 +996,7 @@ export function SettingsModal({ visible, onClose, connectionStatus, onConnect, o
               </View>
               <View style={styles.section}>
                 {(() => {
-                  return CPR_STEPS.map((step) => {
+                  return CPR_TRAINING_STEPS.map((step) => {
                   const uri = videos[step.id];
                   const filename = uri
                     ? isBundledKey(uri)

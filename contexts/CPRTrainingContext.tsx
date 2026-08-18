@@ -4,6 +4,7 @@ import React, { createContext, useContext, useState, useCallback, useRef, useMem
 import {
   CPR_STEPS, type CPRStepId, BREATHS_PER_CYCLE, CYCLES_TRAINING, CYCLES_TESTING,
   COMPRESSION_SETS_REQUIRED, POST_SHOCK_CYCLES_TRAINING, POST_SHOCK_CYCLES_TESTING,
+  getResultsStepIndex, isResultsStep,
 } from '@/constants/cpr-protocol';
 import { arduinoSerial, HIGH_FORCE_THRESHOLD_N, type SensorData, type ArduinoConnectionStatus, type ArduinoConnectionMode, DEFAULT_SENSOR_DATA } from '@/lib/arduino-serial';
 import { sessionRecorder, type CoachingEvent, type SessionSnapshot } from '@/lib/session-recorder';
@@ -473,7 +474,8 @@ export function CPRTrainingProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
-    const sessionActive = isTraining && !isPaused && currentStepIndex < CPR_STEPS.length;
+    const sessionActive =
+      isTraining && !isPaused && !isResultsStep(currentStepId);
     if (sessionActive) {
       timerRef.current = setInterval(() => {
         setStepTimer(prev => prev + 1);
@@ -491,7 +493,7 @@ export function CPRTrainingProvider({ children }: { children: ReactNode }) {
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
     };
-  }, [isTraining, isPaused, currentStepIndex]);
+  }, [isTraining, isPaused, currentStepId]);
 
   const setMode = useCallback((m: TrainingMode) => {
     setModeState(m);
@@ -550,69 +552,85 @@ export function CPRTrainingProvider({ children }: { children: ReactNode }) {
     }
   }, [resetCycleState, resetPostShockCycleState]);
 
+  const finalizeAndShowResults = useCallback(() => {
+    const score = metrics.compressions.totalCompressions > 0
+      ? Math.round((metrics.compressions.goodCompressions / metrics.compressions.totalCompressions) * 100)
+      : 100;
+    const analyticsSummary = sessionAnalytics.finalize(
+      metrics.compressions.avgRate,
+      metrics.compressions.avgDepth,
+    );
+    setMetrics(prev => ({
+      ...prev,
+      elapsedTime: Date.now() - prev.startTime,
+      overallScore: score,
+      coachingEvents: sessionRecorder.getEvents(),
+      snapshots: sessionRecorder.getSnapshots(),
+      sessionAnalytics: analyticsSummary,
+    }));
+    setCurrentStepIndex(getResultsStepIndex());
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+  }, [metrics]);
+
   const advanceStep = useCallback(() => {
-    if (currentStepIndex < CPR_STEPS.length - 1) {
-      setCurrentStepIndex(prev => prev + 1);
-      setStepTimer(0);
-      setMetrics(prev => ({
-        ...prev,
-        compressions: {
-          ...prev.compressions,
-          count: 0,
-          currentRate: 0,
-          currentDepth: 0,
-          rateHistory: [],
-          depthHistory: [],
-          sets: makeDefaultSets(COMPRESSION_SETS_REQUIRED),
-          currentSetIndex: 0,
-        },
-        breaths: {
-          ...prev.breaths,
-          count: 0,
-          currentPressure: 0,
-        },
-      }));
-      setPostAedCompressionCount(0);
-      compressionRates.current = [];
-      lastCompressionTime.current = 0;
-      cyclePhaseRef.current = 'compress';
-      cycleCompressionCountRef.current = 0;
-      cycleBreathCountRef.current = 0;
-      completedCyclesRef.current = 0;
-      setCyclePhase('compress');
-      setCycleCompressionCount(0);
-      setCycleBreathCount(0);
-      setCompletedCycles(0);
-      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    } else {
-      const score = metrics.compressions.totalCompressions > 0
-        ? Math.round((metrics.compressions.goodCompressions / metrics.compressions.totalCompressions) * 100)
-        : 100;
-      const analyticsSummary = sessionAnalytics.finalize(
-        metrics.compressions.avgRate,
-        metrics.compressions.avgDepth,
-      );
-      setMetrics(prev => ({
-        ...prev,
-        elapsedTime: Date.now() - prev.startTime,
-        overallScore: score,
-        coachingEvents: sessionRecorder.getEvents(),
-        snapshots: sessionRecorder.getSnapshots(),
-        sessionAnalytics: analyticsSummary,
-      }));
-      setCurrentStepIndex(CPR_STEPS.length);
-      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    if (isResultsStep(currentStepId)) return;
+
+    const nextIndex = currentStepIndex + 1;
+    const nextStep = CPR_STEPS[nextIndex];
+    if (!nextStep) return;
+
+    if (isResultsStep(nextStep.id)) {
+      finalizeAndShowResults();
+      return;
     }
-  }, [currentStepIndex, metrics]);
+
+    setCurrentStepIndex(nextIndex);
+    setStepTimer(0);
+    setMetrics(prev => ({
+      ...prev,
+      compressions: {
+        ...prev.compressions,
+        count: 0,
+        currentRate: 0,
+        currentDepth: 0,
+        rateHistory: [],
+        depthHistory: [],
+        sets: makeDefaultSets(COMPRESSION_SETS_REQUIRED),
+        currentSetIndex: 0,
+      },
+      breaths: {
+        ...prev.breaths,
+        count: 0,
+        currentPressure: 0,
+      },
+    }));
+    setPostAedCompressionCount(0);
+    compressionRates.current = [];
+    lastCompressionTime.current = 0;
+    cyclePhaseRef.current = 'compress';
+    cycleCompressionCountRef.current = 0;
+    cycleBreathCountRef.current = 0;
+    completedCyclesRef.current = 0;
+    setCyclePhase('compress');
+    setCycleCompressionCount(0);
+    setCycleBreathCount(0);
+    setCompletedCycles(0);
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+  }, [currentStepIndex, currentStepId, finalizeAndShowResults]);
 
   const goToStep = useCallback((index: number) => {
-    if (index >= 0 && index < CPR_STEPS.length) {
-      setCurrentStepIndex(index);
-      setStepTimer(0);
-      setHandPlacementVerified(false);
-      resetCycleState();
+    if (index < 0 || index >= CPR_STEPS.length) return;
+
+    if (isResultsStep(CPR_STEPS[index]?.id)) {
+      finalizeAndShowResults();
+      return;
     }
-  }, [resetCycleState]);
+
+    setCurrentStepIndex(index);
+    setStepTimer(0);
+    setHandPlacementVerified(false);
+    resetCycleState();
+  }, [resetCycleState, finalizeAndShowResults]);
 
   const connectArduino = useCallback(async () => {
     return await arduinoSerial.connect();

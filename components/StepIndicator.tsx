@@ -23,6 +23,7 @@ const STEP_ICONS: Record<string, string> = {
   aed_analyze: 'monitor-shimmer',
   aed_shock: 'lightning-bolt',
   post_aed_compressions: 'heart-pulse',
+  complete: 'clipboard-check',
 };
 
 export function StepIndicator({ currentStepIndex, onStepPress }: StepIndicatorProps) {

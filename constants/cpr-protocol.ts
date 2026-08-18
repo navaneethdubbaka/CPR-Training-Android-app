@@ -118,7 +118,27 @@ export const CPR_STEPS: CPRStep[] = [
     requiresCamera: true,
     sensorType: 'compression_and_breath',
   },
+  {
+    id: 'complete',
+    number: 10,
+    title: 'Results',
+    instruction: 'View session results',
+    detail: 'Jump here anytime to open the session results page with score, analytics, and export.',
+    autoAdvance: false,
+    advanceCondition: 'manual',
+  },
 ];
+
+/** Training steps only (excludes the Results page). */
+export const CPR_TRAINING_STEPS = CPR_STEPS.filter((s) => s.id !== 'complete');
+
+export function isResultsStep(stepId: CPRStepId | undefined | null): boolean {
+  return stepId === 'complete';
+}
+
+export function getResultsStepIndex(): number {
+  return CPR_STEPS.findIndex((s) => s.id === 'complete');
+}
 
 export const COMPRESSION_TARGET_RATE = { min: 100, max: 120, ideal: 110 };
 export const COMPRESSION_TARGET_DEPTH = { min: 5, max: 6, ideal: 5.5 };
