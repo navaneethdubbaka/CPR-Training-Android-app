@@ -555,7 +555,7 @@ export function CPRTrainingProvider({ children }: { children: ReactNode }) {
   const finalizeAndShowResults = useCallback(() => {
     const score = metrics.compressions.totalCompressions > 0
       ? Math.round((metrics.compressions.goodCompressions / metrics.compressions.totalCompressions) * 100)
-      : 100;
+      : 0;
     const analyticsSummary = sessionAnalytics.finalize(
       metrics.compressions.avgRate,
       metrics.compressions.avgDepth,
