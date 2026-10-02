@@ -1,4 +1,4 @@
-export type HardwareProfileId = 'mpr121_legacy' | 'analog_v2';
+export type HardwareProfileId = 'mpr121_legacy' | 'analog_v2' | 'analog_tof_v1';
 
 export type SensorChannelType =
   | 'i2c_touch'
@@ -68,13 +68,14 @@ const MPR121_CHANNELS: SensorChannelTemplate[] = [
   channel(11, 'Digital Button 4', 'digital', 'D10', 'on/off', 'Digital push button on pin 10'),
 ];
 
-const ANALOG_CHANNELS: SensorChannelTemplate[] = [
+/** Shared analog / ToF CSV layout (12ch). Channel type `ultrasonic` = standoff distance cm. */
+const ANALOG_TOF_CHANNELS: SensorChannelTemplate[] = [
   channel(0, 'Shoulder (Left)', 'analog_touch', 'A15', 'on/off', 'Shoulder tap sensor — left channel'),
   channel(1, 'Shoulder (Right)', 'analog_touch', 'A15', 'on/off', 'Shoulder tap sensor — right channel (duplicate)'),
   channel(2, 'AED Pad Upper', 'analog_touch', 'A9', 'on/off', 'Upper AED pad placement sensor'),
   channel(3, 'AED Pad Lower', 'analog_touch', 'A11', 'on/off', 'Lower AED pad placement sensor'),
   channel(4, 'Neck Tilt', 'analog_touch', 'A7', 'on/off', 'Head-tilt / open-airway sensor'),
-  channel(5, 'Ultrasonic Distance', 'ultrasonic', 'D12/D13', 'cm', 'PING ultrasonic compression depth'),
+  channel(5, 'VL53L0X ToF Distance', 'ultrasonic', 'I2C SDA/SCL', 'cm', 'VL53L0X time-of-flight compression standoff'),
   channel(6, 'Breath Pressure', 'analog', 'J5.A1', 'V', 'Rescue breath blow sensor (0-5V)'),
   channel(7, 'Compression Force', 'force', 'A13', 'N', 'Compression force sensor (0-600)'),
   channel(8, 'Spare 0', 'digital', '—', 'on/off', 'Unused channel'),
@@ -82,6 +83,26 @@ const ANALOG_CHANNELS: SensorChannelTemplate[] = [
   channel(10, 'Spare 2', 'digital', '—', 'on/off', 'Unused channel'),
   channel(11, 'Spare 3', 'digital', '—', 'on/off', 'Unused channel'),
 ];
+
+const ANALOG_TOF_ASSIGNMENTS: SensorAssignments = {
+  leftShoulder: 0,
+  rightShoulder: 1,
+  compressionDepth: 5,
+  compressionForce: 7,
+  breathPressure: 6,
+  aedPadUpper: 2,
+  aedPadLower: 3,
+  neckTilt: 4,
+};
+
+const ANALOG_TOF_PROFILE_BASE = {
+  channels: ANALOG_TOF_CHANNELS,
+  defaultAssignments: ANALOG_TOF_ASSIGNMENTS,
+  forceScale: { max: 600, defaultMinPeak: 30 },
+  breathInput: 'voltage' as const,
+  breathVoltageToCmH2O: 50,
+  analogTouchThreshold: 512,
+};
 
 export const HARDWARE_PROFILES: Record<HardwareProfileId, HardwareProfile> = {
   mpr121_legacy: {
@@ -103,38 +124,39 @@ export const HARDWARE_PROFILES: Record<HardwareProfileId, HardwareProfile> = {
     breathInput: 'voltage',
     breathVoltageToCmH2O: 50,
   },
+  analog_tof_v1: {
+    id: 'analog_tof_v1',
+    label: 'Analog ToF (VL53L0X)',
+    firmwarePath: '/attached_assets/analog_hardware_serial/analog_hardware_serial.ino',
+    ...ANALOG_TOF_PROFILE_BASE,
+  },
+  /** Silent alias of analog_tof_v1 — same ToF math for old storage / banners. */
   analog_v2: {
     id: 'analog_v2',
-    label: 'Analog v2',
+    label: 'Analog ToF (legacy id)',
     firmwarePath: '/attached_assets/analog_hardware_serial/analog_hardware_serial.ino',
-    channels: ANALOG_CHANNELS,
-    defaultAssignments: {
-      leftShoulder: 0,
-      rightShoulder: 1,
-      compressionDepth: 5,
-      compressionForce: 7,
-      breathPressure: 6,
-      aedPadUpper: 2,
-      aedPadLower: 3,
-      neckTilt: 4,
-    },
-    forceScale: { max: 600, defaultMinPeak: 30 },
-    breathInput: 'voltage',
-    breathVoltageToCmH2O: 50,
-    analogTouchThreshold: 512,
+    ...ANALOG_TOF_PROFILE_BASE,
   },
 };
 
-export const DEFAULT_HARDWARE_PROFILE_ID: HardwareProfileId = 'analog_v2';
+export const DEFAULT_HARDWARE_PROFILE_ID: HardwareProfileId = 'analog_tof_v1';
 
-export const HARDWARE_PROFILE_LIST = Object.values(HARDWARE_PROFILES);
+/** Profiles shown in Settings (hide silent analog_v2 alias). */
+export const HARDWARE_PROFILE_LIST = Object.values(HARDWARE_PROFILES).filter(
+  (p) => p.id !== 'analog_v2',
+);
 
 export function getHardwareProfile(id: HardwareProfileId): HardwareProfile {
   return HARDWARE_PROFILES[id];
 }
 
 export function isHardwareProfileId(value: string): value is HardwareProfileId {
-  return value === 'mpr121_legacy' || value === 'analog_v2';
+  return value === 'mpr121_legacy' || value === 'analog_v2' || value === 'analog_tof_v1';
+}
+
+/** Baseline standoff depth (rest − raw) — ToF analog hardware. */
+export function isStandoffDepthProfile(id: HardwareProfileId): boolean {
+  return id === 'analog_tof_v1' || id === 'analog_v2';
 }
 
 export function assignmentsStorageKey(profileId: HardwareProfileId): string {
@@ -142,7 +164,7 @@ export function assignmentsStorageKey(profileId: HardwareProfileId): string {
 }
 
 export const MPR121_LEGACY_CHANNELS = MPR121_CHANNELS;
-export const ANALOG_V2_CHANNELS = ANALOG_CHANNELS;
+export const ANALOG_V2_CHANNELS = ANALOG_TOF_CHANNELS;
 
 export const MPR121_LEGACY_ASSIGNMENTS = HARDWARE_PROFILES.mpr121_legacy.defaultAssignments;
-export const ANALOG_V2_ASSIGNMENTS = HARDWARE_PROFILES.analog_v2.defaultAssignments;
+export const ANALOG_V2_ASSIGNMENTS = HARDWARE_PROFILES.analog_tof_v1.defaultAssignments;

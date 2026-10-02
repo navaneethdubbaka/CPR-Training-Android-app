@@ -10,7 +10,7 @@ import type { CPRPostureResult } from '@/lib/pose-analysis';
 import type { PoseCheckMode } from '@/lib/cpr-pose-constants';
 import { pickPoseCue, pickSensorCue, speakCoachingCue } from '@/lib/coaching-cues';
 import { PoseCueChips } from '@/components/PoseCueChips';
-import { arduinoSerial } from '@/lib/arduino-serial';
+import { arduinoSerial, isStandoffDepthProfile } from '@/lib/arduino-serial';
 
 interface CompressionSet {
   count: number;
@@ -202,9 +202,9 @@ function CorrectionSidebar({
   const showForce = arduinoSerial.isForceChannelAssigned();
   const depthSensorLive = arduinoSerial.isCompressionDepthAssigned()
     && arduinoSerial.getStatus() === 'connected';
-  const isAnalogV2Force = arduinoSerial.getHardwareProfileId() === 'analog_v2' && showForce;
-  const forceMax = isAnalogV2Force ? 150 : 5;
-  const forceUnit = isAnalogV2Force ? 'N' : 'V';
+  const isAnalogForce = isStandoffDepthProfile(arduinoSerial.getHardwareProfileId()) && showForce;
+  const forceMax = isAnalogForce ? 150 : 5;
+  const forceUnit = isAnalogForce ? 'N' : 'V';
   const rateOk = currentRate >= COMPRESSION_TARGET_RATE.min && currentRate <= COMPRESSION_TARGET_RATE.max;
   const depthOk = currentDepth >= COMPRESSION_TARGET_DEPTH.min && currentDepth <= COMPRESSION_TARGET_DEPTH.max;
   const rateColor = getRateColor(currentRate, Colors);
@@ -274,7 +274,7 @@ function CorrectionSidebar({
               max={forceMax}
               targetMin={arduinoSerial.getForceMinPeak()}
               targetMax={forceMax}
-              color={getDepthColor((currentForce ?? 0) >= arduinoSerial.getForceMinPeak() ? (isAnalogV2Force ? 5.5 : 5.5) : 3, Colors)}
+              color={getDepthColor((currentForce ?? 0) >= arduinoSerial.getForceMinPeak() ? (isAnalogForce ? 5.5 : 5.5) : 3, Colors)}
               label="Force"
               unit={forceUnit}
               Colors={Colors}

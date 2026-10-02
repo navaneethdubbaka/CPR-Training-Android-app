@@ -23,6 +23,7 @@ import {
   DEFAULT_BAUD_RATE,
   HARDWARE_PROFILE_LIST,
   getHardwareProfile,
+  isStandoffDepthProfile,
   type HardwareProfileId,
   type AvailablePort,
 } from '@/lib/arduino-serial';
@@ -176,8 +177,8 @@ function ChannelCard({ channel, isConnected, channelIndex, offset, onOffsetChang
     }
     if (typeof channel.currentValue === 'number') {
       const profileId = arduinoSerial.getHardwareProfileId();
-      const isAnalogV2Depth = channel.type === 'ultrasonic' && profileId === 'analog_v2' && offset !== undefined;
-      if (isAnalogV2Depth) {
+      const isStandoffDepth = channel.type === 'ultrasonic' && isStandoffDepthProfile(profileId) && offset !== undefined;
+      if (isStandoffDepth) {
         const raw = channel.currentValue;
         const effective = Math.max(0, Math.min(8, (offset ?? 0) - raw));
         return effective.toFixed(1);
@@ -218,8 +219,8 @@ function ChannelCard({ channel, isConnected, channelIndex, offset, onOffsetChang
 
   const rawVal = typeof channel.currentValue === 'number' ? channel.currentValue : 0;
   const profileId = arduinoSerial.getHardwareProfileId();
-  const isAnalogV2Depth = channel.type === 'ultrasonic' && profileId === 'analog_v2' && offset !== undefined;
-  const adjustedVal = isAnalogV2Depth
+  const isStandoffDepth = channel.type === 'ultrasonic' && isStandoffDepthProfile(profileId) && offset !== undefined;
+  const adjustedVal = isStandoffDepth
     ? Math.max(0, Math.min(8, (offset ?? 0) - rawVal))
     : channel.type === 'force' && offset !== undefined
       ? Math.min(150, Math.max(0, rawVal - offset))
@@ -249,7 +250,7 @@ function ChannelCard({ channel, isConnected, channelIndex, offset, onOffsetChang
         </View>
       </View>
       <Text style={[styles.sensorDescription, { color: C.textSecondary }]}>{channel.description}</Text>
-      {isAnalogV2Depth && (
+      {isStandoffDepth && (
         <Text style={[styles.offsetHint, { color: C.textMuted, marginBottom: 8 }]}>
           Effective 0 at rest is correct — compressions increase effective depth.
         </Text>
@@ -932,7 +933,7 @@ export function SettingsModal({ visible, onClose, connectionStatus, onConnect, o
   const digitalCount = sensors.filter(s => s.type === 'digital').length;
   const analogCount = sensors.filter(s => s.type === 'analog' || s.type === 'ultrasonic' || s.type === 'force').length;
   const activeSensorCount = sensors.filter(s => s.active).length;
-  const touchSectionTitle = hardwareProfileId === 'analog_v2'
+  const touchSectionTitle = isStandoffDepthProfile(hardwareProfileId)
     ? 'Analog Touch Sensors'
     : 'I2C Capacitive Touch (MPR121)';
   const touchSensors = sensors.filter(s => s.type === 'i2c_touch' || s.type === 'analog_touch');
@@ -1132,7 +1133,7 @@ export function SettingsModal({ visible, onClose, connectionStatus, onConnect, o
                           onPress={() => handleHardwareProfileChange(profile.id)}
                         >
                           <MaterialCommunityIcons
-                            name={profile.id === 'analog_v2' ? 'flash' : 'chip'}
+                            name={isStandoffDepthProfile(profile.id) ? 'radar' : 'chip'}
                             size={20}
                             color={hardwareProfileId === profile.id ? C.accent : C.textMuted}
                           />
@@ -1143,7 +1144,9 @@ export function SettingsModal({ visible, onClose, connectionStatus, onConnect, o
                             {profile.label}
                           </Text>
                           <Text style={styles.connTypeDesc}>
-                            {profile.id === 'analog_v2' ? 'A7/A9/A11/A13/A15 + J5.A1' : 'MPR121 I2C touch + A0'}
+                            {isStandoffDepthProfile(profile.id)
+                              ? 'A7/A9/A11/A13/A15 + I2C ToF + J5.A1'
+                              : 'MPR121 I2C touch + A0'}
                           </Text>
                         </Pressable>
                       ))}
@@ -1312,7 +1315,7 @@ export function SettingsModal({ visible, onClose, connectionStatus, onConnect, o
                       <View style={styles.noPortsCard}>
                         <MaterialCommunityIcons name="google-chrome" size={20} color={C.textMuted} />
                         <Text style={styles.noPortsText}>
-                          {`1. Close Arduino IDE Serial Monitor (only one app can use the port)\n2. Flash sketch at ${config.baudRate} baud on Mega 2560\n3. Plug Arduino into this PC via USB\n4. Use Chrome or Edge on desktop (http://localhost)\n5. Tap Connect — pick your Arduino COM port\n6. Serial Monitor tab should show # PROFILE analog_v2 then CSV every ~100ms`}
+                          {`1. Close Arduino IDE Serial Monitor (only one app can use the port)\n2. Flash sketch at ${config.baudRate} baud on Mega 2560\n3. Plug Arduino into this PC via USB\n4. Use Chrome or Edge on desktop (http://localhost)\n5. Tap Connect — pick your Arduino COM port\n6. Serial Monitor tab should show # PROFILE analog_tof_v1 then CSV every ~100ms`}
                           {arduinoSerial.getWebSerialHint()
                             ? `\n\n${arduinoSerial.getWebSerialHint()}`
                             : arduinoSerial.isWebSerialAvailable()
@@ -1622,7 +1625,7 @@ export function SettingsModal({ visible, onClose, connectionStatus, onConnect, o
                   )}
 
                   <View style={styles.section}>
-                    <Text style={styles.sectionTitle}>Ultrasonic / Analog Sensors</Text>
+                    <Text style={styles.sectionTitle}>ToF / Analog Sensors</Text>
                     {measurementSensors.map((sensor) => {
                       const chIdx = parseInt(sensor.id.replace('channel_', ''), 10);
                       const isDepthChannel = chIdx === assignments['compressionDepth'];

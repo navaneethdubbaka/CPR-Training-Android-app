@@ -12,6 +12,7 @@ import {
   assignmentsStorageKey,
   getHardwareProfile,
   isHardwareProfileId,
+  isStandoffDepthProfile,
   type HardwareProfileId,
   type SensorChannelTemplate,
 } from './hardware-profiles';
@@ -178,7 +179,8 @@ const MIN_COMPRESSION_CYCLE_MS = 150;
 const DEPTH_CYCLE_START_CM = 1.5;
 const DEPTH_CYCLE_END_CM = 1.0;
 const MIN_VALID_COMPRESSION_DEPTH_CM = 2.0;
-const MAX_VALID_COMPRESSION_DEPTH_CM = 6.0;
+/** ToF standoff travel peak ceiling (matches COMPRESSION_DEPTH_MAX_CM). */
+const MAX_VALID_COMPRESSION_DEPTH_CM = 8.0;
 const ULTRASONIC_OFFSET_STALE_CM = 5;
 export const HIGH_FORCE_THRESHOLD_N = 150;
 const TOUCH_ON_SAMPLES = 5;
@@ -633,7 +635,7 @@ class ArduinoSerialManager {
     if (resetAssignments) {
       this.assignments = { ...profile.defaultAssignments };
     }
-    if (profileId === 'analog_v2') {
+    if (isStandoffDepthProfile(profileId)) {
       const depthIdx = this.assignments.compressionDepth;
       if (depthIdx !== null && depthIdx >= 0 && depthIdx < 12) {
         this.channelInverts[depthIdx] = false;
@@ -1041,8 +1043,8 @@ class ArduinoSerialManager {
   private updateChannelsFromRaw(rawChannels: number[]) {
     const filtered = [...rawChannels];
     const depthIdx = this.assignments.compressionDepth;
-    if (this.profileId === 'analog_v2' && depthIdx !== null && depthIdx < filtered.length) {
-      filtered[depthIdx] = this.filterUltrasonicStandoff(filtered[depthIdx]);
+    if (isStandoffDepthProfile(this.profileId) && depthIdx !== null && depthIdx < filtered.length) {
+      filtered[depthIdx] = this.filterToFStandoff(filtered[depthIdx]);
     }
 
     for (let i = 0; i < 12; i++) {
@@ -1053,7 +1055,7 @@ class ArduinoSerialManager {
       const rawVal = i < filtered.length ? filtered[i] : 0;
       const normalized = this.normalizeChannelValue(ch, rawVal);
       const isBinary = ch.type === 'i2c_touch' || ch.type === 'digital' || ch.type === 'analog_touch';
-      const skipInvert = ch.type === 'ultrasonic' && this.profileId === 'analog_v2';
+      const skipInvert = ch.type === 'ultrasonic' && isStandoffDepthProfile(this.profileId);
 
       let val: number;
       if (isBinary) {
@@ -1201,10 +1203,11 @@ class ArduinoSerialManager {
     return 0;
   }
 
-  private filterUltrasonicStandoff(raw: number): number {
+  /** ToF/standoff jump + median filter. Loose enough for rest~15 → deep~6 drops. */
+  private filterToFStandoff(raw: number): number {
     let value = raw;
     const ref = this.lastValidDepthRaw > 0 ? this.lastValidDepthRaw : this.ultrasonicOffset;
-    const jumpLimit = Math.max(ref * 0.5, 2);
+    const jumpLimit = Math.max(ref * 0.85, 12);
 
     if (value <= 0 && ref > 0) {
       value = ref;
@@ -1225,7 +1228,7 @@ class ArduinoSerialManager {
   }
 
   private usesBaselineDepth(): boolean {
-    return this.profileId === 'analog_v2' && this.assignments.compressionDepth !== null;
+    return isStandoffDepthProfile(this.profileId) && this.assignments.compressionDepth !== null;
   }
 
   private computeCompressionDepthCm(rawStandoff: number): number {
@@ -1346,7 +1349,7 @@ class ArduinoSerialManager {
   }
 
   private usesDepthOnlyDetection(): boolean {
-    return this.profileId === 'analog_v2' && this.assignments.compressionDepth !== null;
+    return isStandoffDepthProfile(this.profileId) && this.assignments.compressionDepth !== null;
   }
 
   getForceOffset(): number {
@@ -2187,7 +2190,7 @@ class ArduinoSerialManager {
 
     const cycleCountBefore = this.cycleCompressionCount;
     const wave = [0, 3, 5.5, 6.5, 6.5, 5, 2, 0];
-    const forceWave = this.profileId === 'analog_v2'
+    const forceWave = isStandoffDepthProfile(this.profileId)
       ? [0, 80, 150, 220, 220, 120, 40, 0]
       : [0, 0.8, 1.5, 2.2, 2.2, 1.2, 0.4, 0];
     let step = 0;
@@ -2261,7 +2264,7 @@ class ArduinoSerialManager {
       compressionDetected: true,
       compressionPeak: 5.5,
       compressionForcePeak: this.isDedicatedForceChannel()
-        ? (this.profileId === 'analog_v2' ? 220 : 2.2)
+        ? (isStandoffDepthProfile(this.profileId) ? 220 : 2.2)
         : undefined,
       breathDetected: false,
       breathCount: this.cycleBreathCount,
@@ -2330,4 +2333,4 @@ export {
   DEFAULT_ASSIGNMENTS,
 };
 export type { HardwareProfileId } from './hardware-profiles';
-export { HARDWARE_PROFILE_LIST, getHardwareProfile } from './hardware-profiles';
+export { HARDWARE_PROFILE_LIST, getHardwareProfile, isStandoffDepthProfile } from './hardware-profiles';
