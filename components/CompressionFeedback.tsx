@@ -11,6 +11,7 @@ import type { PoseCheckMode } from '@/lib/cpr-pose-constants';
 import { pickPoseCue, pickSensorCue, speakCoachingCue } from '@/lib/coaching-cues';
 import { PoseCueChips } from '@/components/PoseCueChips';
 import { arduinoSerial, isStandoffDepthProfile } from '@/lib/arduino-serial';
+import { newtonsToKgf } from '@/lib/force-units';
 
 interface CompressionSet {
   count: number;
@@ -203,8 +204,12 @@ function CorrectionSidebar({
   const depthSensorLive = arduinoSerial.isCompressionDepthAssigned()
     && arduinoSerial.getStatus() === 'connected';
   const isAnalogForce = isStandoffDepthProfile(arduinoSerial.getHardwareProfileId()) && showForce;
-  const forceMax = isAnalogForce ? 150 : 5;
-  const forceUnit = isAnalogForce ? 'N' : 'V';
+  const forceMaxN = isAnalogForce ? 150 : 5;
+  const forceMinPeakN = arduinoSerial.getForceMinPeak();
+  const forceMax = isAnalogForce ? newtonsToKgf(forceMaxN) : forceMaxN;
+  const forceMinPeak = isAnalogForce ? newtonsToKgf(forceMinPeakN) : forceMinPeakN;
+  const forceValue = isAnalogForce ? newtonsToKgf(currentForce ?? 0) : (currentForce ?? 0);
+  const forceUnit = isAnalogForce ? 'kg' : 'V';
   const rateOk = currentRate >= COMPRESSION_TARGET_RATE.min && currentRate <= COMPRESSION_TARGET_RATE.max;
   const depthOk = currentDepth >= COMPRESSION_TARGET_DEPTH.min && currentDepth <= COMPRESSION_TARGET_DEPTH.max;
   const rateColor = getRateColor(currentRate, Colors);
@@ -269,12 +274,12 @@ function CorrectionSidebar({
           <>
             <View style={[sidebarStyles.divider, { backgroundColor: Colors.border }]} />
             <GaugeBar
-              value={currentForce ?? 0}
+              value={forceValue}
               min={0}
               max={forceMax}
-              targetMin={arduinoSerial.getForceMinPeak()}
+              targetMin={forceMinPeak}
               targetMax={forceMax}
-              color={getDepthColor((currentForce ?? 0) >= arduinoSerial.getForceMinPeak() ? (isAnalogForce ? 5.5 : 5.5) : 3, Colors)}
+              color={getDepthColor((currentForce ?? 0) >= forceMinPeakN ? (isAnalogForce ? 5.5 : 5.5) : 3, Colors)}
               label="Force"
               unit={forceUnit}
               Colors={Colors}

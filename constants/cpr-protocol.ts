@@ -95,7 +95,7 @@ export const CPR_STEPS: CPRStep[] = [
     detail: 'Everyone stand clear of the patient. The AED is analyzing the heart rhythm. Do not touch the patient during analysis.',
     autoAdvance: true,
     advanceCondition: 'aed_analysis_complete',
-    duration: 5,
+    duration: 10,
   },
   {
     id: 'aed_shock',

@@ -5,6 +5,12 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { getColors } from '@/constants/colors';
 import { useTheme } from '@/contexts/ThemeContext';
 import { BREATHS_PER_CYCLE } from '@/constants/cpr-protocol';
+import {
+  BREATH_PRESSURE_GOOD_MIN,
+  BREATH_PRESSURE_GOOD_MAX,
+  BREATH_PRESSURE_OK_MIN,
+  BREATH_PRESSURE_OK_MAX,
+} from '@/lib/breath-thresholds';
 
 interface BreathFeedbackProps {
   count: number;
@@ -18,15 +24,15 @@ interface BreathFeedbackProps {
 
 function getPressureColor(pressure: number, Colors: ReturnType<typeof getColors>): string {
   if (pressure === 0) return Colors.textMuted;
-  if (pressure >= 15 && pressure <= 25) return Colors.feedbackGood;
-  if (pressure >= 10 && pressure <= 30) return Colors.feedbackOk;
+  if (pressure >= BREATH_PRESSURE_GOOD_MIN && pressure <= BREATH_PRESSURE_GOOD_MAX) return Colors.feedbackGood;
+  if (pressure >= BREATH_PRESSURE_OK_MIN && pressure <= BREATH_PRESSURE_OK_MAX) return Colors.feedbackOk;
   return Colors.feedbackBad;
 }
 
 function getPressureLabel(pressure: number): string {
   if (pressure === 0) return 'Waiting...';
-  if (pressure < 15) return 'Too Weak';
-  if (pressure > 25) return 'Too Strong';
+  if (pressure < BREATH_PRESSURE_GOOD_MIN) return 'Too Weak';
+  if (pressure > BREATH_PRESSURE_GOOD_MAX) return 'Too Strong';
   return 'Good Breath';
 }
 
@@ -43,7 +49,7 @@ export function BreathFeedback({
 
   useEffect(() => {
     if (currentPressure > 5) {
-      const fillPct = Math.min(currentPressure / 25, 1);
+      const fillPct = Math.min(currentPressure / BREATH_PRESSURE_GOOD_MAX, 1);
       breathIndicator.value = withTiming(fillPct * 100, { duration: 300 });
       lungScale.value = withSequence(
         withTiming(1 + fillPct * 0.3, { duration: 500 }),

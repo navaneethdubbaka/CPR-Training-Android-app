@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { View, Text, StyleSheet, Pressable } from 'react-native';
 import Animated, { useSharedValue, useAnimatedStyle, withTiming, withRepeat, withSequence } from 'react-native-reanimated';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -8,6 +8,7 @@ import { useTheme } from '@/contexts/ThemeContext';
 import { CPR_STEPS, COMPRESSIONS_PER_CYCLE, BREATHS_PER_CYCLE } from '@/constants/cpr-protocol';
 import { VoicePrompt } from '@/components/VoicePrompt';
 import { arduinoSerial } from '@/lib/arduino-serial';
+import { voiceRecognition } from '@/lib/voice-recognition';
 
 interface InstructionPanelProps {
   stepIndex: number;
@@ -98,6 +99,42 @@ export function InstructionPanel({
     opacity: pulseOpacity.value,
   }));
 
+  const advanceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (advanceTimerRef.current) {
+        clearTimeout(advanceTimerRef.current);
+        advanceTimerRef.current = null;
+      }
+    };
+  }, [stepIndex]);
+
+  const scheduleAdvance = useCallback((delayMs: number) => {
+    if (advanceTimerRef.current) {
+      clearTimeout(advanceTimerRef.current);
+    }
+    voiceRecognition.prepareHandoff();
+    advanceTimerRef.current = setTimeout(() => {
+      advanceTimerRef.current = null;
+      onAdvance();
+    }, delayMs);
+  }, [onAdvance]);
+
+  const handleSceneSafetySuccess = useCallback(() => {
+    onVoiceSuccess?.();
+    scheduleAdvance(300);
+  }, [onVoiceSuccess, scheduleAdvance]);
+
+  const handleResponsivenessVoiceSuccess = useCallback(() => {
+    onVoiceSuccess?.();
+  }, [onVoiceSuccess]);
+
+  const handleCall911Success = useCallback(() => {
+    onVoiceSuccess?.();
+    scheduleAdvance(400);
+  }, [onVoiceSuccess, scheduleAdvance]);
+
   if (!step) return null;
 
   const iconName = STEP_ICONS[step.id] || 'information-outline';
@@ -107,26 +144,17 @@ export function InstructionPanel({
   const isSceneSafety = step.id === 'scene_safety';
   const isCheckResponsiveness = step.id === 'check_responsiveness';
   const isCall911 = step.id === 'call_911';
+  const isHandPlacement = step.id === 'hand_placement';
+  const isAedPads = step.id === 'aed_pads';
+  const isAedAnalyze = step.id === 'aed_analyze';
+  const isAedShock = step.id === 'aed_shock';
   const useVoiceForStep = isSceneSafety || isCheckResponsiveness || isCall911;
 
-  const checkResponsivenessAllDone = isCheckResponsiveness && (voiceCompleted ?? false) && (shoulderTapDone ?? false);
-
-  const handleSceneSafetySuccess = useCallback(() => {
-    onVoiceSuccess?.();
-    setTimeout(() => onAdvance(), 300);
-  }, [onVoiceSuccess, onAdvance]);
-
-  const handleResponsivenessVoiceSuccess = useCallback(() => {
-    onVoiceSuccess?.();
-  }, [onVoiceSuccess]);
-
-  const handleCall911Success = useCallback(() => {
-    onVoiceSuccess?.();
-    setTimeout(() => onAdvance(), 400);
-  }, [onVoiceSuccess, onAdvance]);
-
   const showAdvanceButton = () => {
-    if (isCheckResponsiveness) return false;
+    // Auto-advance only — no manual Continue that can race the timer.
+    if (isCheckResponsiveness || isHandPlacement || isAedPads || isAedAnalyze || isAedShock) {
+      return false;
+    }
     if (!step.autoAdvance || canAdvance) return true;
     return false;
   };
@@ -252,7 +280,9 @@ export function InstructionPanel({
 
       {isCheckResponsiveness && (
         <View style={[styles.dualConditionContainer, { backgroundColor: Colors.surfaceLight }]}>
-          <Text style={[styles.dualConditionTitle, { color: Colors.textMuted }]}>Complete both to continue:</Text>
+          <Text style={[styles.dualConditionTitle, { color: Colors.textMuted }]}>
+            Tap the shoulder, then ask “Are you okay?”
+          </Text>
           <View style={styles.checkboxRow}>
             <View style={[styles.checkItem, shoulderTapDone && styles.checkItemDone]}>
               <MaterialCommunityIcons
@@ -275,7 +305,13 @@ export function InstructionPanel({
               </Text>
             </View>
           </View>
-          {!(voiceCompleted ?? false) && (
+          {!(shoulderTapDone ?? false) && (
+            <View style={styles.waitingForSensor}>
+              <MaterialCommunityIcons name="timer-sand" size={14} color={Colors.info} />
+              <Text style={[styles.waitingText, { color: Colors.info }]}>Waiting for shoulder tap...</Text>
+            </View>
+          )}
+          {(shoulderTapDone ?? false) && !(voiceCompleted ?? false) && (
             <VoicePrompt
               key={`voice-responsiveness-${stepIndex}`}
               targetPhrase="are you okay"
@@ -284,24 +320,6 @@ export function InstructionPanel({
               onSuccess={handleResponsivenessVoiceSuccess}
               disabled={voiceCompleted ?? false}
             />
-          )}
-          {(voiceCompleted ?? false) && !(shoulderTapDone ?? false) && (
-            <View style={styles.waitingForSensor}>
-              <MaterialCommunityIcons name="timer-sand" size={14} color={Colors.info} />
-              <Text style={[styles.waitingText, { color: Colors.info }]}>Waiting for shoulder tap...</Text>
-            </View>
-          )}
-          {checkResponsivenessAllDone && (
-            <Pressable
-              style={[styles.advanceBtn, { backgroundColor: Colors.accent }]}
-              onPress={() => {
-                Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-                onAdvance();
-              }}
-            >
-              <Text style={[styles.advanceBtnText, { color: Colors.text }]}>Continue</Text>
-              <MaterialCommunityIcons name="arrow-right" size={20} color={Colors.text} />
-            </Pressable>
           )}
         </View>
       )}

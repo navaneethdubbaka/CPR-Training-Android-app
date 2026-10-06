@@ -24,9 +24,11 @@ import {
   HARDWARE_PROFILE_LIST,
   getHardwareProfile,
   isStandoffDepthProfile,
+  HIGH_FORCE_THRESHOLD_N,
   type HardwareProfileId,
   type AvailablePort,
 } from '@/lib/arduino-serial';
+import { formatForceKgf } from '@/lib/force-units';
 import type { BleDevice } from '@/lib/ble-serial';
 import { videoAssignments, type VideoAssignments } from '@/lib/video-assignments';
 import { getBundledVideoList, isBundledKey, bundledLabel } from '@/lib/bundled-videos';
@@ -183,10 +185,18 @@ function ChannelCard({ channel, isConnected, channelIndex, offset, onOffsetChang
         const effective = Math.max(0, Math.min(8, (offset ?? 0) - raw));
         return effective.toFixed(1);
       }
+      if (channel.type === 'force' && channel.unit === 'N') {
+        const forceN = offset !== undefined
+          ? Math.min(150, Math.max(0, channel.currentValue - offset))
+          : channel.currentValue;
+        return formatForceKgf(forceN);
+      }
       return channel.currentValue > 0 ? channel.currentValue.toFixed(1) : '0';
     }
     return '--';
   };
+
+  const displayUnit = channel.type === 'force' && channel.unit === 'N' ? 'kg' : channel.unit;
 
   const handleInvertToggle = (val: boolean) => {
     setInverted(val);
@@ -246,7 +256,7 @@ function ChannelCard({ channel, isConnected, channelIndex, offset, onOffsetChang
           <Text style={[styles.sensorValue, { color: C.textMuted }, isActive && { color: C.feedbackGood }]}>
             {displayValue()}
           </Text>
-          <Text style={[styles.sensorUnit, { color: C.textMuted }]}>{channel.unit}</Text>
+          <Text style={[styles.sensorUnit, { color: C.textMuted }]}>{displayUnit}</Text>
         </View>
       </View>
       <Text style={[styles.sensorDescription, { color: C.textSecondary }]}>{channel.description}</Text>
@@ -304,7 +314,9 @@ function ChannelCard({ channel, isConnected, channelIndex, offset, onOffsetChang
           </View>
           {isConnected && (
             <Text style={[styles.offsetPreview, { color: C.textMuted }]}>
-              Raw: {rawVal.toFixed(1)} {channel.unit}{'  →  '}Effective: {adjustedVal.toFixed(1)} {channel.unit}
+              {channel.type === 'force' && channel.unit === 'N'
+                ? `Raw: ${formatForceKgf(rawVal)} kg  →  Effective: ${formatForceKgf(adjustedVal)} kg`
+                : `Raw: ${rawVal.toFixed(1)} ${channel.unit}  →  Effective: ${adjustedVal.toFixed(1)} ${channel.unit}`}
             </Text>
           )}
         </View>
@@ -317,7 +329,11 @@ function ChannelCard({ channel, isConnected, channelIndex, offset, onOffsetChang
               backgroundColor: isActive ? typeColor : C.surfaceLight,
             }]} />
           </View>
-          <Text style={[styles.rangeText, { color: C.textMuted }]}>{channel.minValue} - {channel.maxValue} {channel.unit}</Text>
+          <Text style={[styles.rangeText, { color: C.textMuted }]}>
+            {channel.type === 'force' && channel.unit === 'N'
+              ? `${formatForceKgf(channel.minValue)} - ${formatForceKgf(channel.maxValue)} kg`
+              : `${channel.minValue} - ${channel.maxValue} ${channel.unit}`}
+          </Text>
         </View>
       )}
     </View>
@@ -1551,7 +1567,7 @@ export function SettingsModal({ visible, onClose, connectionStatus, onConnect, o
                     <View style={styles.section}>
                       <Text style={styles.sectionTitle}>Compression Force Threshold</Text>
                       <Text style={[styles.assignmentHeaderText, { marginBottom: 10 }]}>
-                        Compressions are counted from ultrasonic depth only. Force is shown for live feedback; compressions above 150 N appear on the session report. Minimum peak (N) below is legacy — not used for counting on Analog v2.
+                        Compressions are counted from ultrasonic depth only. Force is shown for live feedback; compressions above {formatForceKgf(HIGH_FORCE_THRESHOLD_N)} kg appear on the session report. Minimum peak (N) below is legacy — not used for counting on Analog v2.
                       </Text>
                       <View style={styles.tcpRow}>
                         <View style={{ flex: 1 }}>

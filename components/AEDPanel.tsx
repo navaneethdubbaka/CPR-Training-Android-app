@@ -171,6 +171,10 @@ export function AEDPanel({
   const { theme } = useTheme();
   const ThemedColors = getColors(theme);
   const padsPlaced = upperPadPlaced && lowerPadPlaced;
+  /** Analysis UI only while pads are OK — both red = NOT OK. */
+  const analysisActive = analyzing && padsPlaced;
+  const shockFiredRef = useRef(false);
+  const shockCompleteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const screenFlash = useSharedValue(0);
   const shockBtnScale = useSharedValue(1);
   const shockBtnGlow = useSharedValue(0);
@@ -182,7 +186,7 @@ export function AEDPanel({
     ? 'shocked'
     : shockAdvised
     ? 'charged'
-    : analyzing
+    : analysisActive
     ? 'analyzing'
     : 'powered';
 
@@ -196,12 +200,18 @@ export function AEDPanel({
   }, []);
 
   useEffect(() => {
-    if (analyzing) {
-      chargingBarWidth.value = withTiming(100, { duration: 5000 });
+    if (!shockDelivered) {
+      shockFiredRef.current = false;
+    }
+  }, [shockDelivered]);
+
+  useEffect(() => {
+    if (analysisActive) {
+      chargingBarWidth.value = withTiming(100, { duration: 10000 });
     } else {
       chargingBarWidth.value = 0;
     }
-  }, [analyzing]);
+  }, [analysisActive]);
 
   useEffect(() => {
     if (aedState === 'charged') {
@@ -232,6 +242,8 @@ export function AEDPanel({
 
   const handleShock = useCallback(() => {
     if (aedState !== 'charged') return;
+    if (shockFiredRef.current) return;
+    shockFiredRef.current = true;
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
     screenFlash.value = withSequence(
       withTiming(1, { duration: 60 }),
@@ -241,9 +253,24 @@ export function AEDPanel({
     );
     onShockPress();
     if (onShockComplete) {
-      setTimeout(() => onShockComplete(), 2000);
+      if (shockCompleteTimerRef.current) {
+        clearTimeout(shockCompleteTimerRef.current);
+      }
+      shockCompleteTimerRef.current = setTimeout(() => {
+        shockCompleteTimerRef.current = null;
+        onShockComplete();
+      }, 2000);
     }
   }, [aedState, onShockPress, onShockComplete]);
+
+  useEffect(() => {
+    return () => {
+      if (shockCompleteTimerRef.current) {
+        clearTimeout(shockCompleteTimerRef.current);
+        shockCompleteTimerRef.current = null;
+      }
+    };
+  }, []);
 
   const screenFlashStyle = useAnimatedStyle(() => ({
     opacity: screenFlash.value,
@@ -295,6 +322,14 @@ export function AEDPanel({
         icon: 'monitor-shimmer' as const,
       };
     }
+    if (analyzing && !padsPlaced) {
+      return {
+        title: 'AED NOT OK',
+        subtitle: 'Pads disconnected — Reattach electrode pads',
+        color: ThemedColors.feedbackBad,
+        icon: 'alert-circle' as const,
+      };
+    }
     if (padsPlaced) {
       return {
         title: 'AED READY',
@@ -314,7 +349,7 @@ export function AEDPanel({
   const lcd = getLCDContent();
   const canShock = aedState === 'charged';
   const showBodyDiagram = !analyzing && !shockAdvised && !shockDelivered;
-  const showEcg = analyzing || (aedState === 'charged' && !shockDelivered);
+  const showEcg = analysisActive || (aedState === 'charged' && !shockDelivered);
 
   return (
     <View style={styles.deviceBody}>
@@ -342,11 +377,11 @@ export function AEDPanel({
 
           {showEcg && (
             <View style={styles.ecgViewport}>
-              <EcgWaveform active={showEcg} />
+              <EcgWaveform active />
             </View>
           )}
 
-          {(aedState === 'analyzing') && (
+          {aedState === 'analyzing' && (
             <View style={styles.chargeBarWrapper}>
               <Text style={styles.chargeBarLabel}>ANALYZING...</Text>
               <View style={styles.chargeBarTrack}>
@@ -383,7 +418,7 @@ export function AEDPanel({
                 }]} />
                 <Text style={styles.padIndicatorLabel}>UPPER</Text>
                 <Text style={[styles.padIndicatorStatus, { color: upperPadPlaced ? ThemedColors.aedGreen : ThemedColors.feedbackBad }]}>
-                  {upperPadPlaced ? 'OK' : '--'}
+                  {upperPadPlaced ? 'OK' : 'NOT OK'}
                 </Text>
               </View>
               <View style={styles.padConnectorLine} />
@@ -396,7 +431,7 @@ export function AEDPanel({
                 }]} />
                 <Text style={styles.padIndicatorLabel}>LOWER</Text>
                 <Text style={[styles.padIndicatorStatus, { color: lowerPadPlaced ? ThemedColors.aedGreen : ThemedColors.feedbackBad }]}>
-                  {lowerPadPlaced ? 'OK' : '--'}
+                  {lowerPadPlaced ? 'OK' : 'NOT OK'}
                 </Text>
               </View>
             </View>

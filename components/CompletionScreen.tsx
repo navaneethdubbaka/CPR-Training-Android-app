@@ -16,6 +16,8 @@ import {
   getSessionCompressionTarget,
   type SessionTargetMode,
 } from '@/constants/cpr-protocol';
+import { HIGH_FORCE_THRESHOLD_N } from '@/lib/arduino-serial';
+import { formatForceKgf } from '@/lib/force-units';
 
 interface CompletionScreenProps {
   overallScore: number;
@@ -263,7 +265,7 @@ export function CompletionScreen({
         <AnimatedStat
           label="High-force compressions"
           value={String(sessionAnalytics.highForceCompressionCount)}
-          sublabel=">150 N"
+          sublabel={`>${formatForceKgf(HIGH_FORCE_THRESHOLD_N)} kg`}
           delay={1200}
           color={sessionAnalytics.highForceCompressionCount === 0 ? Colors.feedbackGood : Colors.feedbackOk}
           surfaceColor={Colors.surface}

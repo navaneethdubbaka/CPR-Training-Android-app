@@ -6,19 +6,41 @@ import { sessionRecorder } from '@/lib/session-recorder';
 
 let lastSpokenAt = 0;
 
-export function speakCoachingCue(text: string, source: 'pose' | 'sensor' = 'pose', stepId?: string): void {
+export type SpeakCoachingOptions = {
+  source?: 'pose' | 'sensor';
+  stepId?: string;
+  /** Bypass the 3s coaching throttle (e.g. shock confirmation). */
+  force?: boolean;
+};
+
+export function speakCoachingCue(
+  text: string,
+  sourceOrOptions: 'pose' | 'sensor' | SpeakCoachingOptions = 'pose',
+  stepId?: string,
+): void {
   try {
+    const options: SpeakCoachingOptions =
+      typeof sourceOrOptions === 'string'
+        ? { source: sourceOrOptions, stepId }
+        : sourceOrOptions;
+    const source = options.source ?? 'pose';
     const now = Date.now();
-    if (now - lastSpokenAt < 3000) return;
+    if (!options.force && now - lastSpokenAt < 3000) return;
     lastSpokenAt = now;
-    if (stepId) {
-      sessionRecorder.logCoachingEvent(stepId, source, text);
+    if (options.stepId) {
+      sessionRecorder.logCoachingEvent(options.stepId, source, text);
     }
     Speech.speak(text, {
       language: 'en-US',
       pitch: 1.0,
       rate: 0.95,
     });
+  } catch (_) {}
+}
+
+export function stopCoachingSpeech(): void {
+  try {
+    Speech.stop();
   } catch (_) {}
 }
 

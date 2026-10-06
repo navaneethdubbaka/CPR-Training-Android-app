@@ -972,8 +972,7 @@ class ArduinoSerialManager {
             emitPhase = 'BREATH';
             this.phase = 'BREATH';
             this.cycleCompressionCount = 0;
-            this.breathState = 'IDLE';
-            this.peakPressure = 0;
+            this.resetBreathDetection();
           }
         }
       }
@@ -992,6 +991,7 @@ class ArduinoSerialManager {
           this.cycleBreathCount = 0;
           this.compressionState = 'IDLE';
           this.peakDepth = 0;
+          this.resetBreathDetection();
         }
       }
     }
@@ -1151,22 +1151,29 @@ class ArduinoSerialManager {
   private cycleCompressionCount = 0;
   private cycleBreathCount = 0;
 
+  /** Full breath SM reset so consecutive cycles get a clean rising edge. */
+  private resetBreathDetection() {
+    this.breathState = 'IDLE';
+    this.peakPressure = 0;
+    this.lastPressure = 0;
+  }
+
   setPhase(phase: 'COMPRESSION' | 'BREATH') {
     this.phase = phase;
 
     // 🔥 Reset states when switching
     this.compressionState = 'IDLE';
     this.forceCompressionState = 'IDLE';
-    this.breathState = 'IDLE';
+    this.resetBreathDetection();
     this.peakDepth = 0;
     this.peakForce = 0;
     this.peakForceRaw = 0;
-    this.peakPressure = 0;
   }
 
   resetCycleDetection() {
     this.compressionState = 'IDLE';
     this.forceCompressionState = 'IDLE';
+    this.resetBreathDetection();
     this.lastDepthForDepth = 0;
     this.lastForceForDepth = 0;
     this.lastForceForForce = 0;
@@ -1175,6 +1182,7 @@ class ArduinoSerialManager {
     this.peakForceRaw = 0;
     this.forceCycleStartAt = 0;
     this.cycleCompressionCount = 0;
+    this.cycleBreathCount = 0;
   }
 
   prepareCompressionStep() {
@@ -1548,8 +1556,6 @@ class ArduinoSerialManager {
 
     let detected = false;
 
-    console.log("Breath Detection - Pressure:", pressureVal, "State:", this.breathState);
-
     switch (this.breathState) {
 
       case 'IDLE':
@@ -1572,18 +1578,10 @@ class ArduinoSerialManager {
 
       case 'EXHALE':
         if (pressureVal < endThreshold && this.peakPressure > peakThreshold) {
-
-          console.log("🌬️ ONE Breath Detected:", this.peakPressure);
-
           detected = true;
-
-          this.breathState = 'IDLE';
-          this.peakPressure = 0;
+          this.resetBreathDetection();
         } else if (pressureVal < endThreshold && this.peakPressure <= peakThreshold) {
-          console.log("⚠️ Resetting invalid EXHALE");
-
-          this.breathState = 'IDLE';
-          this.peakPressure = 0;
+          this.resetBreathDetection();
         }
         break;
 
@@ -1709,11 +1707,8 @@ class ArduinoSerialManager {
       case 'sensor_data':
         if (msg.data && msg.data.channels) {
           const rawChannels: number[] = msg.data.channels;
-          console.log(rawChannels);
-
           this.updateChannelsFromRaw(rawChannels);
           const sensorData = this.transformRawToSensorData(rawChannels);
-          console.log(sensorData);
           this.emit(sensorData);
         }
         break;
@@ -2238,8 +2233,7 @@ class ArduinoSerialManager {
       emitPhase = 'BREATH';
       this.phase = 'BREATH';
       this.cycleCompressionCount = 0;
-      this.breathState = 'IDLE';
-      this.peakPressure = 0;
+      this.resetBreathDetection();
     }
 
     this.compressionState = 'IDLE';

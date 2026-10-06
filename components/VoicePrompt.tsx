@@ -156,6 +156,7 @@ export function VoicePrompt({
       isMounted.current = false;
       clearRestartTimer();
       setVoiceListening(false);
+      // Handoff to next voice step keeps the stream; otherwise release.
       void voiceRecognition.stopListening();
     };
   }, [clearRestartTimer, setVoiceListening]);
@@ -178,7 +179,7 @@ export function VoicePrompt({
   const setMicStateSafe = useCallback((state: MicState) => {
     micStateRef.current = state;
     setMicState(state);
-    setVoiceListening(state === 'starting');
+    setVoiceListening(state === 'starting' || state === 'listening');
   }, [setVoiceListening]);
 
   const handleManualConfirm = useCallback(() => {
@@ -189,7 +190,7 @@ export function VoicePrompt({
     micPulse.value = withTiming(1, { duration: 200 });
     setMicStateSafe('recognized');
     setVoiceListening(false);
-    void voiceRecognition.stopListening();
+    voiceRecognition.prepareHandoff();
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
     setTimeout(() => {
       if (isMounted.current) onSuccess();
@@ -212,10 +213,10 @@ export function VoicePrompt({
     if (!isMounted.current || successFiredRef.current || isMutedRef.current) return;
     setErrorMessage('');
     setHeardText('');
-    // Drop to idle so startListening's anti-thrash guard allows a controlled restart.
+    // Keep listening UX during settle — avoid random OFF flash.
     micStateRef.current = 'idle';
-    setMicState('idle');
-    setVoiceListening(false);
+    setMicState('listening');
+    setVoiceListening(true);
     scheduleRestart(() => {
       if (isMounted.current && !successFiredRef.current && !isMutedRef.current) {
         void startListeningRef.current();
@@ -286,7 +287,8 @@ export function VoicePrompt({
           micPulse.value = withTiming(1, { duration: 200 });
           setMicStateSafe('recognized');
           setVoiceListening(false);
-          void voiceRecognition.stopListening();
+          // Keep stream briefly for next voice step remount.
+          voiceRecognition.prepareHandoff();
           Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
           setTimeout(() => {
             if (isMounted.current) onSuccess();

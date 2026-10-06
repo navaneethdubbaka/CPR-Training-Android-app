@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
-import { View, Text, StyleSheet, ScrollView, Platform, useWindowDimensions } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Platform, useWindowDimensions, Pressable } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -34,6 +34,10 @@ export default function TrainingScreen() {
   const [postureResult, setPostureResult] = useState<CPRPostureResult | null>(null);
   const [framingGateOpen, setFramingGateOpen] = useState(false);
   const framingSinceRef = useRef<number | null>(null);
+  const advancingRef = useRef(false);
+  const aedAnalyzeElapsedRef = useRef(0);
+  const aedAnalyzeLastTickRef = useRef<number | null>(null);
+  const [aedAnalyzeElapsedMs, setAedAnalyzeElapsedMs] = useState(0);
   const insets = useSafeAreaInsets();
   const { width: screenWidth, height: screenHeight } = useWindowDimensions();
   const topInset = Platform.OS === 'web' ? 67 : insets.top;
@@ -53,7 +57,7 @@ export default function TrainingScreen() {
     aedShockDelivered, handPlacementVerified, postAedCompressionCount,
     cyclePhase, cycleCompressionCount, cycleBreathCount, completedCycles,
     postShockCyclePhase, postShockCycleCompressionCount, postShockCycleBreathCount, postShockCompletedCycles,
-    startTraining, pauseTraining, resumeTraining, resetTraining,
+    startTraining, pauseTraining, resumeTraining, resetTraining, endSession,
     advanceStep, goToStep, connectArduino, disconnectArduino,
     simulateSensor, deliverShock, verifyHandPlacement, simulateCompression, simulateBreath,
   } = useCPRTraining();
@@ -74,14 +78,32 @@ export default function TrainingScreen() {
     ? 'Align your head and shoulders inside the box, then look down at the chest'
     : 'Adjust camera until your head, shoulders, and hands are inside the box';
 
+  const currentStepIdRef = useRef(currentStepId);
+  currentStepIdRef.current = currentStepId;
+
+  const safeAdvanceStep = useCallback((expectedStepId?: string) => {
+    if (advancingRef.current) return;
+    if (expectedStepId && currentStepIdRef.current !== expectedStepId) return;
+    advancingRef.current = true;
+    advanceStep();
+  }, [advanceStep]);
+
   useEffect(() => {
     setVoiceCompleted(false);
+    setPostureResult(null);
   }, [currentStepIndex]);
 
   useEffect(() => {
     framingSinceRef.current = null;
     setFramingGateOpen(false);
+    advancingRef.current = false;
+    aedAnalyzeElapsedRef.current = 0;
+    aedAnalyzeLastTickRef.current = null;
+    setAedAnalyzeElapsedMs(0);
   }, [currentStepIndex]);
+
+
+
 
   useEffect(() => {
     const poseFramingRequired = showPoseTracking;
@@ -163,6 +185,55 @@ export default function TrainingScreen() {
   // End of Satya Code
  // const shoulderTapDone = sensorData.touchSensors.leftShoulder || sensorData.touchSensors.rightShoulder;
 
+  // Step 7: 10s analyze timer starts only when both pads locked; resets on unlock.
+  useEffect(() => {
+    if (currentStep?.id !== 'aed_analyze' || !isTraining) {
+      aedAnalyzeElapsedRef.current = 0;
+      aedAnalyzeLastTickRef.current = null;
+      setAedAnalyzeElapsedMs(0);
+      return;
+    }
+
+    const padsLocked =
+      sensorData.touchSensors.aedPadUpper && sensorData.touchSensors.aedPadLower;
+
+    if (!padsLocked) {
+      aedAnalyzeElapsedRef.current = 0;
+      aedAnalyzeLastTickRef.current = null;
+      setAedAnalyzeElapsedMs(0);
+      return;
+    }
+
+    if (isPaused) {
+      aedAnalyzeLastTickRef.current = null;
+      return;
+    }
+
+    if (aedAnalyzeLastTickRef.current === null) {
+      aedAnalyzeLastTickRef.current = Date.now();
+    }
+
+    const id = setInterval(() => {
+      const now = Date.now();
+      const last = aedAnalyzeLastTickRef.current;
+      if (last === null) {
+        aedAnalyzeLastTickRef.current = now;
+        return;
+      }
+      aedAnalyzeElapsedRef.current += now - last;
+      aedAnalyzeLastTickRef.current = now;
+      setAedAnalyzeElapsedMs(aedAnalyzeElapsedRef.current);
+    }, 100);
+
+    return () => clearInterval(id);
+  }, [
+    currentStep?.id,
+    isTraining,
+    isPaused,
+    sensorData.touchSensors.aedPadUpper,
+    sensorData.touchSensors.aedPadLower,
+  ]);
+
   const canAutoAdvance = useMemo(() => {
     if (!currentStep) return false;
     switch (currentStep.id) {
@@ -175,7 +246,11 @@ export default function TrainingScreen() {
       case 'aed_pads':
         return sensorData.touchSensors.aedPadUpper && sensorData.touchSensors.aedPadLower;
       case 'aed_analyze':
-        return stepTimer >= 5;
+        return (
+          sensorData.touchSensors.aedPadUpper
+          && sensorData.touchSensors.aedPadLower
+          && aedAnalyzeElapsedMs >= 10000
+        );
       case 'aed_shock':
         return aedShockDelivered;
       case 'post_aed_compressions':
@@ -183,7 +258,7 @@ export default function TrainingScreen() {
       default:
         return false;
     }
-  }, [currentStep, sensorData, stepTimer, handPlacementVerified, completedCycles, totalCycles, aedShockDelivered, postShockCompletedCycles, postShockTotalCycles, shoulderTapDone, voiceCompleted]);
+  }, [currentStep, sensorData, aedAnalyzeElapsedMs, handPlacementVerified, completedCycles, totalCycles, aedShockDelivered, postShockCompletedCycles, postShockTotalCycles, shoulderTapDone, voiceCompleted]);
 
   const stepCanAdvance = useMemo(() => {
     const isCycleStep =
@@ -203,11 +278,14 @@ export default function TrainingScreen() {
   }, [currentStep, canAutoAdvance, framingGateOpen]);
 
   useEffect(() => {
-    if (stepCanAdvance && currentStep?.autoAdvance && isTraining && !isPaused) {
-      const timer = setTimeout(() => advanceStep(), 500);
-      return () => clearTimeout(timer);
-    }
-  }, [stepCanAdvance, currentStep, isTraining, isPaused, advanceStep]);
+    if (!stepCanAdvance || !currentStep?.autoAdvance || !isTraining || isPaused) return;
+    if (advancingRef.current) return;
+    const expectedId = currentStep.id;
+    const timer = setTimeout(() => {
+      safeAdvanceStep(expectedId);
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [stepCanAdvance, currentStep, isTraining, isPaused, safeAdvanceStep]);
 
   const getAutoAdvanceText = useCallback(() => {
     if (!currentStep) return undefined;
@@ -230,8 +308,15 @@ export default function TrainingScreen() {
         const lower = sensorData.touchSensors.aedPadLower ? 'Placed' : 'Waiting';
         return `Upper: ${upper} | Lower: ${lower}`;
       }
-      case 'aed_analyze':
-        return `Analyzing: ${stepTimer}s / 5s`;
+      case 'aed_analyze': {
+        const padsLocked =
+          sensorData.touchSensors.aedPadUpper && sensorData.touchSensors.aedPadLower;
+        if (!padsLocked) {
+          return 'AED NOT OK — reattach pads';
+        }
+        const secs = Math.min(10, Math.floor(aedAnalyzeElapsedMs / 1000));
+        return `Analyzing: ${secs}s / 10s`;
+      }
       case 'post_aed_compressions': {
         if (postShockCompletedCycles >= postShockTotalCycles) {
           return `All ${postShockTotalCycles} cycles complete — finishing…`;
@@ -244,7 +329,7 @@ export default function TrainingScreen() {
       default:
         return undefined;
     }
-  }, [currentStep, sensorData, stepTimer, handPlacementVerified, cyclePhase, cycleCompressionCount, cycleBreathCount, completedCycles, totalCycles, postShockCyclePhase, postShockCycleCompressionCount, postShockCycleBreathCount, postShockCompletedCycles, postShockTotalCycles]);
+  }, [currentStep, sensorData, aedAnalyzeElapsedMs, handPlacementVerified, cyclePhase, cycleCompressionCount, cycleBreathCount, completedCycles, totalCycles, postShockCyclePhase, postShockCycleCompressionCount, postShockCycleBreathCount, postShockCompletedCycles, postShockTotalCycles]);
 
   const showAED = isAedStep(currentStepId);
   const framingBlocked = showPoseTracking && !framingGateOpen;
@@ -369,7 +454,7 @@ export default function TrainingScreen() {
           shockAdvised={currentStep?.id === 'aed_shock'}
           onShockPress={deliverShock}
           shockDelivered={aedShockDelivered}
-          onShockComplete={advanceStep}
+          onShockComplete={() => safeAdvanceStep('aed_shock')}
         />
       )}
 
@@ -409,7 +494,7 @@ export default function TrainingScreen() {
       <InstructionPanel
         stepIndex={currentStepIndex}
         stepTimer={stepTimer}
-        onAdvance={advanceStep}
+        onAdvance={() => safeAdvanceStep(currentStep?.id)}
         canAdvance={stepCanAdvance}
         framingBlocked={framingBlocked}
         framingMessage={framingMessage}
@@ -471,14 +556,26 @@ export default function TrainingScreen() {
         <StatusBar style={theme === 'dark' ? 'light' : 'dark'} />
         <View style={styles.topBar}>
           <StepIndicator currentStepIndex={currentStepIndex} onStepPress={goToStep} />
-          <SensorStatus
-            connectionStatus={connectionStatus}
-            connectionMode={connectionMode}
-            hardwareOnly={hardwareOnly}
-            onConnect={connectArduino}
-            onDisconnect={disconnectArduino}
-            touchSensors={sensorData.touchSensors}
-          />
+          <View style={styles.topBarActions}>
+            <Pressable
+              style={[styles.endSessionBtn, { borderColor: Colors.accent, backgroundColor: Colors.surface }]}
+              onPress={() => {
+                advancingRef.current = false;
+                endSession();
+              }}
+            >
+              <MaterialCommunityIcons name="stop-circle-outline" size={16} color={Colors.accent} />
+              <Text style={[styles.endSessionBtnText, { color: Colors.accent }]}>End Session</Text>
+            </Pressable>
+            <SensorStatus
+              connectionStatus={connectionStatus}
+              connectionMode={connectionMode}
+              hardwareOnly={hardwareOnly}
+              onConnect={connectArduino}
+              onDisconnect={disconnectArduino}
+              touchSensors={sensorData.touchSensors}
+            />
+          </View>
         </View>
         <View style={styles.mainContentRow}>
           {renderVisualPanel()}
@@ -492,7 +589,19 @@ export default function TrainingScreen() {
     <View style={[styles.container, { paddingTop: topInset, paddingBottom: bottomInset || 8 }]}>
       <StatusBar style={theme === 'dark' ? 'light' : 'dark'} />
       <View style={styles.topBarPortrait}>
-        <StepIndicator currentStepIndex={currentStepIndex} onStepPress={goToStep} />
+        <View style={styles.topBarPortraitRow}>
+          <StepIndicator currentStepIndex={currentStepIndex} onStepPress={goToStep} />
+          <Pressable
+            style={[styles.endSessionBtn, { borderColor: Colors.accent, backgroundColor: Colors.surface }]}
+            onPress={() => {
+              advancingRef.current = false;
+              endSession();
+            }}
+          >
+            <MaterialCommunityIcons name="stop-circle-outline" size={16} color={Colors.accent} />
+            <Text style={[styles.endSessionBtnText, { color: Colors.accent }]}>End Session</Text>
+          </Pressable>
+        </View>
         <SensorStatus
           connectionStatus={connectionStatus}
           connectionMode={connectionMode}
@@ -529,8 +638,33 @@ function makeStyles(Colors: ReturnType<typeof getColors>) {
       justifyContent: 'space-between',
       gap: 12,
     },
+    topBarActions: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+      flexShrink: 1,
+    },
     topBarPortrait: {
       gap: 8,
+    },
+    topBarPortraitRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 8,
+    },
+    endSessionBtn: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
+      paddingHorizontal: 10,
+      paddingVertical: 6,
+      borderRadius: 8,
+      borderWidth: 1,
+    },
+    endSessionBtnText: {
+      fontSize: 12,
+      fontWeight: '600',
     },
     mainContentRow: {
       flex: 1,

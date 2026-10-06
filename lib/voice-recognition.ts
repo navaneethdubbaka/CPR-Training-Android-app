@@ -81,6 +81,25 @@ class VoiceRecognitionManager {
   private nativeListeners: ListenerSubscription[] = [];
   private startChain: Promise<void> = Promise.resolve();
   private lastNativeStopAt = 0;
+  private handoffUntil = 0;
+  private activeCallbacks: VoiceRecognitionCallbacks | null = null;
+
+  /** Keep mic alive briefly across consecutive VoicePrompt remounts (voice steps). */
+  prepareHandoff(ms = 1000): void {
+    this.handoffUntil = Date.now() + ms;
+  }
+
+  clearHandoff(): void {
+    this.handoffUntil = 0;
+  }
+
+  isHandoffPending(): boolean {
+    return Date.now() < this.handoffUntil;
+  }
+
+  getIsListening(): boolean {
+    return this.isListening;
+  }
 
   private bumpSession(): number {
     this.sessionId += 1;
@@ -109,6 +128,14 @@ class VoiceRecognitionManager {
   }
 
   private async startListeningInternal(callbacks: VoiceRecognitionCallbacks): Promise<void> {
+    // Handoff: rebind callbacks without stop/start thrash.
+    if (this.isListening && this.isHandoffPending()) {
+      this.clearHandoff();
+      this.activeCallbacks = callbacks;
+      callbacks.onStart?.();
+      return;
+    }
+
     if (this.isListening) {
       await this.stopListening();
     }
@@ -123,6 +150,7 @@ class VoiceRecognitionManager {
     }
 
     this.isListening = true;
+    this.activeCallbacks = callbacks;
     const session = this.bumpSession();
 
     Speech.stop();
@@ -135,9 +163,14 @@ class VoiceRecognitionManager {
   }
 
   async stopListening(): Promise<void> {
+    if (this.isHandoffPending()) {
+      return;
+    }
+
     const wasListening = this.isListening;
     this.bumpSession();
     this.isListening = false;
+    this.activeCallbacks = null;
 
     if (Platform.OS === 'web') {
       this.clearNativeListeners();
@@ -187,6 +220,12 @@ class VoiceRecognitionManager {
     } else {
       this.clearNativeListeners();
     }
+  }
+
+  /** Force-stop ignoring handoff (End Session / leave voice steps). */
+  async forceStopListening(): Promise<void> {
+    this.clearHandoff();
+    await this.stopListening();
   }
 
   async destroy(): Promise<void> {
@@ -249,7 +288,7 @@ class VoiceRecognitionManager {
 
     recognition.onstart = () => {
       if (this.isStaleSession(session)) return;
-      callbacks.onStart?.();
+      this.activeCallbacks?.onStart?.();
     };
 
     recognition.onresult = (event: any) => {
@@ -261,20 +300,20 @@ class VoiceRecognitionManager {
           bestTranscript = result[0].transcript;
         }
       }
-      callbacks.onResult?.(bestTranscript);
+      this.activeCallbacks?.onResult?.(bestTranscript);
     };
 
     recognition.onerror = (event: any) => {
       if (this.isStaleSession(session)) return;
       const errMsg = event.error === 'no-speech' ? 'No speech detected' : `Error: ${event.error}`;
-      callbacks.onError?.(errMsg);
+      this.activeCallbacks?.onError?.(errMsg);
     };
 
     recognition.onend = () => {
       if (this.isStaleSession(session)) return;
       this.webRecognition = null;
       this.isListening = false;
-      callbacks.onEnd?.();
+      this.activeCallbacks?.onEnd?.();
     };
 
     try {
@@ -319,7 +358,7 @@ class VoiceRecognitionManager {
     this.nativeListeners.push(
       ExpoSpeechRecognitionModule.addListener('start', () => {
         if (this.isStaleSession(session)) return;
-        callbacks.onStart?.();
+        this.activeCallbacks?.onStart?.();
       }),
     );
 
@@ -335,7 +374,7 @@ class VoiceRecognitionManager {
           }
         }
         if (bestTranscript) {
-          callbacks.onResult?.(bestTranscript);
+          this.activeCallbacks?.onResult?.(bestTranscript);
         }
       }),
     );
@@ -344,7 +383,7 @@ class VoiceRecognitionManager {
       ExpoSpeechRecognitionModule.addListener('error', (event: { error?: string; message?: string }) => {
         if (this.isStaleSession(session)) return;
         const msg = event.message ?? event.error ?? 'Recognition error';
-        callbacks.onError?.(msg);
+        this.activeCallbacks?.onError?.(msg);
       }),
     );
 
@@ -352,7 +391,7 @@ class VoiceRecognitionManager {
       ExpoSpeechRecognitionModule.addListener('end', () => {
         if (this.isStaleSession(session)) return;
         this.isListening = false;
-        callbacks.onEnd?.();
+        this.activeCallbacks?.onEnd?.();
       }),
     );
 
